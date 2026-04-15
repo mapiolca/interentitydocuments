@@ -1,0 +1,7 @@
+# this file exist for extrafield because the name of langs col in llx_extrafields is limited to 64 char and interentitydocuments@interentitydocuments is too long
+
+
+AutoReceptionWarehouse = Entrepôt de reception auto
+AutoReceptionWarehouseHelp = Dans le cas d'une reception automatique entre entité l'entrepôt de reception doit être défini à l'avance
+supplierOrderDetSource = Liaison des lignes de commandes entre entités
+supplierOrderDetSourceHelp = Liaison des lignes de commandes fournisseur et commandes client entre entité

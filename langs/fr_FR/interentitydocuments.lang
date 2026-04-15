@@ -1,0 +1,23 @@
+Module104200Name = Commandes depuis les commandes fournisseurs multi-company
+Module104200Desc = Créé des commandes clients depuis les commandes fournisseurs d'autres entités
+interentitydocumentsSetupPage=Ajoutez ici la correspondance entre un tiers et une entité.
+interentitydocumentsSetup=Créé des commandes clients depuis les commandes fournisseurs d'autres entités
+
+# CONF
+
+OFSOMStatusConf = Status d'une commande fournisseur qui permet la création d'une commande liée
+OFSOMLinkStatusSupplierOrderOrderChild = Lors de la réception d'une commande fournisseur, classer les commandes client liées en "Traitée"
+OFSOMUpdateLineSource = Après modification du prix d'achat ou quantité sur la ligne commande client, met à jour la ligne sur la commande fournisseur associée
+
+OFSOMErrorBadStatusOrder = La commande fournisseur %s de l'entité mére n'est pas dans un statut permettant la reception de votre commande fournisseur à vous
+
+OFSOMUpdateOrderSource = Après ajout ou suppression d'une ligne sur la commande client, ajoute ou supprime la ligne sur la commande fournisseur source
+OFSOM_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED = Passe la commande fournisseur à reçue (coté entité cliente) lors de la clôture de l'expédition (Entité entité fournisseur)
+OFSOM_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED_HELP = <strong>ATTENTION</strong> : <ul><li>Le partage des produits entre les entités correspondantes doit être actif</li><li>Cette option est à activer sur l'entité fournisseur</li></ul>
+ThisEntityMappingNeedToBeDoneOnEachEntityListed = La liaison entre les tiers doit être effectuée sur chaque entité pour permettre les échanges bidirectionnels
+
+ReceptionWarehouseNotDefined = Entrepôt de reception auto non défini
+ReceptionWarehouseCheckError = Une erreur s'est produite lors de la vérification de "l'entrepôt de réception auto"
+ReceiveFromAutoWorkflowForSupplierShipment = Réception depuis l'expédition %s du fournisseur
+OFSOM_AUTO_CREATE_SUPPLIER_INVOICE = Créer automatiquement la facture fournisseur dans l'entité de destination lors de la validation d'une facture client vers un tiers multicompany
+ParamOFSOMStatus = Paramétrer les gestions de statut
