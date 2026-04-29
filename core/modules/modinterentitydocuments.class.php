@@ -51,7 +51,7 @@ class modinterentitydocuments extends DolibarrModules
 
         // Family can be 'crm','financial','hr','projects','products','ecm','technic','other'
         // It is used to group modules in module setup page
-        $this->family = "other";
+        $this->family = "Les Métiers du Bâtiment";
         // Module label (no space allowed)
         // used if translation strinpplierordermulticompany 	Description of module interentitydocumentsg 'ModuleXXXName' not found
         // (where XXX is value of numeric property 'numero' of module)
@@ -61,7 +61,7 @@ class modinterentitydocuments extends DolibarrModules
         // (where XXX is value of numeric property 'numero' of module)
         $this->description = "Description of module interentitydocuments";
         // Possible values for version are: 'development', 'experimental' or version
-        $this->version = '2.3.1';
+        $this->version = '1.0.0';
         // Key used in llx_const table to save module status enabled/disabled
         // (where MYMODULE is value of property name of module in uppercase)
         $this->const_name = 'MAIN_MODULE_' . strtoupper($this->name);
@@ -73,7 +73,7 @@ class modinterentitydocuments extends DolibarrModules
         // use this->picto='pictovalue'
         // If file is in module/img directory under name object_pictovalue.png
         // use this->picto='pictovalue@module'
-        $this->picto = 'module.svg@interentitydocuments'; // mypicto@interentitydocuments
+        $this->picto = 'link'; // mypicto@interentitydocuments
         // Defined all module parts (triggers, login, substitutions, menus, css, etc...)
         // for default path (eg: /interentitydocuments/core/xxxxx) (0=disable, 1=enable)
         // for specific path of parts (eg: /interentitydocuments/core/modules/barcode)
