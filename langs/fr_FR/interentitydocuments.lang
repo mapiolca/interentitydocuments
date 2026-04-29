@@ -1,5 +1,5 @@
-Module104200Name = Documents inter-entités
-Module104200Desc = Créé des des documents depuis d'autres entités multicompany
+Module450020Name = Documents inter-entités
+Module450020Desc = Créé des des documents depuis d'autres entités multicompany
 interentitydocumentsSetupPage=Ajoutez ici la correspondance entre un tiers et une entité.
 interentitydocumentsSetup=Créé des des documents depuis d'autres entités multicompany
 
