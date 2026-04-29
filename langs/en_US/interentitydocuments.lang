@@ -1,5 +1,5 @@
-Module104200Name = Orders from purchase orders
-Module104200Desc = Created sales orders from purchase orders to other entities
+Module450020Name = Orders from purchase orders
+Module450020Desc = Created sales orders from purchase orders to other entities
 interentitydocumentsSetupPage = Here the connection between one third and one entity.
 
 # CONF
