@@ -1,7 +1,7 @@
-Module104200Name = Commandes depuis les commandes fournisseurs multi-company
-Module104200Desc = Créé des commandes clients depuis les commandes fournisseurs d'autres entités
+Module104200Name = Documents inter-entités
+Module104200Desc = Créé des des documents depuis d'autres entités multicompany
 interentitydocumentsSetupPage=Ajoutez ici la correspondance entre un tiers et une entité.
-interentitydocumentsSetup=Créé des commandes clients depuis les commandes fournisseurs d'autres entités
+interentitydocumentsSetup=Créé des des documents depuis d'autres entités multicompany
 
 # CONF
 
