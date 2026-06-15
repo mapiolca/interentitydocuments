@@ -7,6 +7,7 @@
 - Correction du doublon ECM lors de la recopie PDF : un PDF source existant est recopié sans régénération.
 - Ajout du flux optionnel commande client validée vers commande fournisseur dans l'entité de destination.
 - Ajout du réglage `OFSOM_AUTO_CREATE_SUPPLIER_ORDER_FROM_CUSTOMER_ORDER`.
+- Correction du warning `$object` dans la préparation des onglets admin.
 - Remplacement d'un accès direct à `$_REQUEST` par `GETPOST()` dans la page de réglages.
 - Conservation de l'entité courante lors d'un échec de suppression d'une commande client cible existante.
 
