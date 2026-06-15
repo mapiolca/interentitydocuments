@@ -42,11 +42,18 @@ if ($action == 'setconststatus') {
 	dolibarr_set_const($db, 'OFSOM_STATUS', GETPOST('OFSOM_STATUS'), 'chaine', 1, '', $conf->entity);
 }
 
-if (isset($_REQUEST['action']) && $_REQUEST['action'] == 'save') {
-	if (!empty($_REQUEST['TLine'])) {
-		foreach ($_REQUEST['TLine'] as $id => $TValues) {
-			$TValues['fk_entity'] = GETPOST('TLine_' . $TValues['rowid'] . '_fk_entity', 'int');
-			$TValues['fk_soc']    = GETPOST('TLine_' . $TValues['rowid'] . '_fk_soc', 'int');
+if ($action == 'save') {
+	$TLine = GETPOST('TLine', 'array');
+	if (!empty($TLine)) {
+		foreach ($TLine as $id => $TValues) {
+			if (!is_array($TValues)) {
+				continue;
+			}
+			$id = (int) $id;
+			$rowid = isset($TValues['rowid']) ? (int) $TValues['rowid'] : 0;
+			$TValues['rowid'] = $rowid;
+			$TValues['fk_entity'] = GETPOST('TLine_' . $rowid . '_fk_entity', 'int');
+			$TValues['fk_soc']    = GETPOST('TLine_' . $rowid . '_fk_soc', 'int');
 
 			$o = new TTELink();
 			if ($id > 0) {
@@ -165,6 +172,7 @@ $TOptions = array(
 	'OFSOM_UPDATE_ORDER_SOURCE'                 => $langs->trans('OFSOMUpdateOrderSource'),
 	'OFSOM_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED' => $langs->trans('OFSOM_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED'),
 	'OFSOM_AUTO_CREATE_SUPPLIER_INVOICE'        => $langs->trans('OFSOM_AUTO_CREATE_SUPPLIER_INVOICE'),
+	'OFSOM_AUTO_CREATE_SUPPLIER_ORDER_FROM_CUSTOMER_ORDER' => $langs->trans('OFSOM_AUTO_CREATE_SUPPLIER_ORDER_FROM_CUSTOMER_ORDER'),
 );
 
 foreach ($TOptions as $confkey => $label) {

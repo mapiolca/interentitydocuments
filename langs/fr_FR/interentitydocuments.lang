@@ -20,4 +20,5 @@ ReceptionWarehouseNotDefined = Entrepôt de reception auto non défini
 ReceptionWarehouseCheckError = Une erreur s'est produite lors de la vérification de "l'entrepôt de réception auto"
 ReceiveFromAutoWorkflowForSupplierShipment = Réception depuis l'expédition %s du fournisseur
 OFSOM_AUTO_CREATE_SUPPLIER_INVOICE = Créer automatiquement la facture fournisseur dans l'entité de destination lors de la validation d'une facture client vers un tiers multicompany
+OFSOM_AUTO_CREATE_SUPPLIER_ORDER_FROM_CUSTOMER_ORDER = Créer automatiquement la commande fournisseur dans l'entité de destination lors de la validation d'une commande client vers un tiers multicompany
 ParamOFSOMStatus = Paramétrer les gestions de statut

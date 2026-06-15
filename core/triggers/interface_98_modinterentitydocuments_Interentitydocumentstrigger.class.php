@@ -160,6 +160,11 @@ class Interfaceinterentitydocumentstrigger
 			// Création automatique de la facture fournisseur dans l'entité de destination
 			return $this->_cloneInvoice($object);
 		}
+		elseif ($action === 'ORDER_VALIDATE' && !empty($conf->global->OFSOM_AUTO_CREATE_SUPPLIER_ORDER_FROM_CUSTOMER_ORDER)) {
+			/** @var Commande $object */
+			// Création automatique de la commande fournisseur dans l'entité de destination.
+			return $this->_cloneSupplierOrderFromCustomerOrder($object);
+		}
 		elseif ($action === 'ORDER_SUPPLIER_RECEIVE') {
 
 			require_once DOL_DOCUMENT_ROOT . '/commande/class/commande.class.php';
@@ -485,6 +490,46 @@ class Interfaceinterentitydocumentstrigger
 			}
 		}
 		return 0;
+	}
+
+	/**
+	 * Crée une commande fournisseur dans l'entité de destination à partir d'une commande client
+	 * @param Commande $object
+	 * @return int <0 if KO, 0 if no action, >0 if OK
+	 */
+	private function _cloneSupplierOrderFromCustomerOrder($object)
+	{
+		global $conf;
+
+		dol_include_once('/interentitydocuments/class/telink.class.php');
+
+		$db =& $this->db;
+		$sourceEntity = !empty($object->entity) ? (int) $object->entity : (int) $conf->entity;
+
+		$res = $db->query("SELECT fk_entity FROM " . MAIN_DB_PREFIX . "thirdparty_entity"
+		                  . " WHERE entity=" . intval($sourceEntity)
+		                  . " AND fk_soc=" . intval($object->socid)
+		                  . ' AND fk_entity <> ' . intval($sourceEntity));
+		if (!$res) {
+			$this->setError('ErrorSQL');
+			return -1;
+		} elseif ($db->num_rows($res) === 0) {
+			// Pas d'entité liée au tiers → rien à faire
+			return 0;
+		}
+		$obj = $db->fetch_object($res);
+
+		if ($obj->fk_entity > 0) {
+			$TTELink = new TTELink();
+			$res = $TTELink->cloneSupplierOrderFromCustomerOrder($object->id, $obj->fk_entity);
+			if ($res < 0) {
+				$this->setError($TTELink->error);
+			}
+			return $res;
+		} else {
+			$this->setError('MissingEntityLink');
+			return -1;
+		}
 	}
 
 	private function _cloneOrder($object)

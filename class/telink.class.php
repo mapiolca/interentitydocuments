@@ -552,6 +552,185 @@ class TTELink
 	}
 
 	/**
+	 * Crée une commande fournisseur dans l'entité cible à partir d'une commande client
+	 * @param int $idOrderSource ID de la commande client source
+	 * @param int $toEntity ID de l'entité cible
+	 * @return int >0 if OK, 0 if no action, <0 if KO
+	 */
+	public function cloneSupplierOrderFromCustomerOrder($idOrderSource, $toEntity)
+	{
+		global $db, $conf, $user;
+
+		dol_include_once('/commande/class/commande.class.php');
+		dol_include_once('/fourn/class/fournisseur.commande.class.php');
+
+		$order = new Commande($db);
+		$res = $order->fetch($idOrderSource);
+		if ($res <= 0) {
+			$this->error = $order->error;
+			return -1;
+		}
+		$res = $order->fetch_lines();
+		if ($res < 0) {
+			$this->error = $order->error;
+			return -1;
+		}
+
+		if (empty($order->entity)) {
+			$order->entity = (int) $conf->entity;
+		}
+
+		$linkedFromSupplierOrder = $this->isCustomerOrderCreatedFromSupplierOrder($order->id);
+		if ($linkedFromSupplierOrder < 0) {
+			return -1;
+		}
+		if ($linkedFromSupplierOrder > 0) {
+			return 0;
+		}
+
+		// Récupération du tiers correspondant à l'entité source dans l'entité cible.
+		$fk_soc = $this->getSocIdFromEntity($order->entity, $toEntity);
+		if ($fk_soc <= 0) {
+			return -1;
+		}
+
+		$existingSupplierOrderId = $this->getSupplierOrderIdFromCustomerOrder($order, $toEntity, $fk_soc);
+		if ($existingSupplierOrderId > 0) {
+			$supplierOrder = new CommandeFournisseur($db);
+
+			$previous_entity = $conf->entity;
+			$conf->entity = $toEntity;
+			if ($supplierOrder->fetch($existingSupplierOrderId) > 0) {
+				$delRes = $supplierOrder->delete($user);
+				if ($delRes < 0) {
+					$this->error = $supplierOrder->error;
+					$conf->entity = $previous_entity;
+					return -3;
+				}
+			} else {
+				$conf->entity = $previous_entity;
+				return -2;
+			}
+			$conf->entity = $previous_entity;
+		}
+
+		$supplierOrder = new CommandeFournisseur($db);
+		$supplierOrder->entity = (int) $toEntity;
+		$supplierOrder->date = !empty($order->date) ? $order->date : dol_now();
+		$supplierOrder->date_commande = !empty($order->date_commande) ? $order->date_commande : $supplierOrder->date;
+		$supplierOrder->delivery_date = !empty($order->delivery_date) ? $order->delivery_date : (!empty($order->date_livraison) ? $order->date_livraison : null);
+		$supplierOrder->ref_supplier = $order->ref;
+		$supplierOrder->socid = $fk_soc;
+		$supplierOrder->fk_project = !empty($order->fk_project) ? $order->fk_project : 0;
+		$supplierOrder->note_public = !empty($order->note_public) ? $order->note_public : '';
+		$supplierOrder->note_private = !empty($order->note_private) ? $order->note_private : '';
+		$supplierOrder->cond_reglement_id = !empty($order->cond_reglement_id) ? $order->cond_reglement_id : 0;
+		$supplierOrder->mode_reglement_id = !empty($order->mode_reglement_id) ? $order->mode_reglement_id : 0;
+		if (isset($order->fk_account)) {
+			$supplierOrder->fk_account = $order->fk_account;
+		}
+		if (isset($order->fk_incoterms)) {
+			$supplierOrder->fk_incoterms = $order->fk_incoterms;
+		}
+		if (isset($order->location_incoterms)) {
+			$supplierOrder->location_incoterms = $order->location_incoterms;
+		}
+		if (isset($order->multicurrency_code)) {
+			$supplierOrder->multicurrency_code = $order->multicurrency_code;
+		}
+		if (isset($order->multicurrency_tx)) {
+			$supplierOrder->multicurrency_tx = $order->multicurrency_tx;
+		}
+		$supplierOrder->lines = array();
+
+		foreach ($order->lines as $line) {
+			$lineSupplierOrder = new CommandeFournisseurLigne($db);
+
+			$TPropertiesToClone = array('desc', 'qty', 'tva_tx', 'vat_src_code', 'localtax1_tx', 'localtax2_tx', 'fk_product', 'remise_percent', 'info_bits', 'date_start', 'date_end', 'product_type', 'rang', 'special_code', 'fk_parent_line', 'label', 'array_options', 'fk_unit', 'multicurrency_subprice');
+
+			foreach ($TPropertiesToClone as $property) {
+				if (isset($line->{$property})) {
+					$lineSupplierOrder->{$property} = $line->{$property};
+				}
+			}
+
+			$lineSupplierOrder->subprice = isset($line->subprice) ? $line->subprice : 0;
+			$lineSupplierOrder->pu_ht = $lineSupplierOrder->subprice;
+			$lineSupplierOrder->qty = isset($lineSupplierOrder->qty) ? $lineSupplierOrder->qty : 0;
+			$lineSupplierOrder->tva_tx = isset($lineSupplierOrder->tva_tx) ? $lineSupplierOrder->tva_tx : 0;
+			$lineSupplierOrder->localtax1_tx = isset($lineSupplierOrder->localtax1_tx) ? $lineSupplierOrder->localtax1_tx : 0;
+			$lineSupplierOrder->localtax2_tx = isset($lineSupplierOrder->localtax2_tx) ? $lineSupplierOrder->localtax2_tx : 0;
+			$lineSupplierOrder->fk_product = isset($lineSupplierOrder->fk_product) ? $lineSupplierOrder->fk_product : 0;
+			$lineSupplierOrder->remise_percent = isset($lineSupplierOrder->remise_percent) ? $lineSupplierOrder->remise_percent : 0;
+			$lineSupplierOrder->info_bits = isset($lineSupplierOrder->info_bits) ? $lineSupplierOrder->info_bits : 0;
+			$lineSupplierOrder->product_type = isset($lineSupplierOrder->product_type) ? $lineSupplierOrder->product_type : 0;
+			$lineSupplierOrder->rang = isset($lineSupplierOrder->rang) ? $lineSupplierOrder->rang : -1;
+			$lineSupplierOrder->special_code = isset($lineSupplierOrder->special_code) ? $lineSupplierOrder->special_code : 0;
+			$lineSupplierOrder->array_options = isset($lineSupplierOrder->array_options) && is_array($lineSupplierOrder->array_options) ? $lineSupplierOrder->array_options : array();
+			$lineSupplierOrder->multicurrency_subprice = isset($lineSupplierOrder->multicurrency_subprice) ? $lineSupplierOrder->multicurrency_subprice : 0;
+			$lineSupplierOrder->ref_fourn = !empty($line->ref_supplier) ? $line->ref_supplier : (!empty($line->ref_fourn) ? $line->ref_fourn : '');
+			$lineSupplierOrder->ref_supplier = $lineSupplierOrder->ref_fourn;
+			$lineSupplierOrder->origin = 'commandedet';
+			$lineSupplierOrder->origin_id = !empty($line->id) ? (int) $line->id : 0;
+
+			$supplierOrder->lines[] = $lineSupplierOrder;
+		}
+
+		$previous_entity = $conf->entity;
+		$conf->entity = (int) $toEntity;
+		$orderCreatedRes = $supplierOrder->create($user);
+		$conf->entity = $previous_entity;
+
+		if ($orderCreatedRes < 0) {
+			$this->error = $supplierOrder->error;
+			return -4;
+		}
+
+		// Transfert de la commande fournisseur dans l'entité cible si la création n'a pas déjà utilisé l'entité cible.
+		$res = $db->query("UPDATE " . MAIN_DB_PREFIX . "commande_fournisseur SET entity=" . intval($toEntity) . " WHERE rowid=" . intval($supplierOrder->id));
+		if (!$res) {
+			$this->error = $db->lasterror();
+			return -5;
+		}
+
+		// Lien entre la commande client et la commande fournisseur dans la table element_element.
+		$sql  = "INSERT INTO " . MAIN_DB_PREFIX . "element_element (fk_source, sourcetype, fk_target, targettype) VALUES (";
+		$sql .= intval($order->id) . ", 'commande', " . intval($supplierOrder->id) . ", 'commandefourn')";
+		$res  = $db->query($sql);
+		if (!$res) {
+			$this->error = $db->lasterror();
+			return -6;
+		}
+
+		$supplierOrder->entity = (int) $toEntity;
+		$this->copySourcePdfToTargetDocuments($order, $supplierOrder, (int) $toEntity);
+
+		return $orderCreatedRes;
+	}
+
+	/**
+	 * Vérifie si une commande client provient déjà d'une commande fournisseur liée
+	 * @param int $orderId ID de la commande client
+	 * @return int <0 if KO, 0 if no link, 1 if linked
+	 */
+	public function isCustomerOrderCreatedFromSupplierOrder($orderId)
+	{
+		global $db;
+
+		$sql = "SELECT rowid FROM " . MAIN_DB_PREFIX . "element_element"
+			. " WHERE fk_target = " . intval($orderId)
+			. " AND targettype = 'commande'"
+			. " AND sourcetype = 'commandefourn'";
+		$res = $db->query($sql);
+		if (!$res) {
+			$this->error = $db->lasterror();
+			return -1;
+		}
+
+		return ($db->num_rows($res) > 0 ? 1 : 0);
+	}
+
+	/**
 	 * Permet de récupérer l'Id de la commande client côté entité fournisseur à partir de la commande fournisseur côté entité cliente
 	 * @param CommandeFournisseur $supplierOrder (côté entité cliente)
 	 * @param int $targetEntity entité cible (entité fournisseur)
@@ -580,6 +759,42 @@ class TTELink
 
 		$obj = $supplierOrder->db->fetch_object($res);
 
+		if ($obj && $obj->rowid > 0) {
+			return $obj->rowid;
+		}
+
+		return 0;
+	}
+
+	/**
+	 * Permet de récupérer l'ID de la commande fournisseur créée côté entité cible à partir de la commande client source
+	 *
+	 * @param Commande $order commande client source
+	 * @param int $targetEntity entité cible
+	 * @param int $targetSocid société cible dans l'entité cible
+	 * @return int supplier order <=0 if KO, >0 if OK
+	 */
+	public function getSupplierOrderIdFromCustomerOrder($order, $targetEntity, $targetSocid = false)
+	{
+		if (!$targetSocid) {
+			$targetSocid = $this->getSocIdFromEntity($order->entity, $targetEntity);
+		}
+
+		if ($targetSocid <= 0) {
+			return -1;
+		}
+
+		$sql = "SELECT rowid FROM " . MAIN_DB_PREFIX . "commande_fournisseur"
+			. " WHERE fk_soc = " . intval($targetSocid) . " AND entity=" . intval($targetEntity) . " AND ref_supplier='" . $order->db->escape($order->ref) . "' ";
+
+		$res = $order->db->query($sql);
+
+		if (!$res) {
+			$this->error = $order->db->lasterror();
+			return -2;
+		}
+
+		$obj = $order->db->fetch_object($res);
 		if ($obj && $obj->rowid > 0) {
 			return $obj->rowid;
 		}
@@ -738,7 +953,7 @@ class TTELink
 	}
 
 	/**
-	 * Return the native Dolibarr document directory for an object and entity.
+	 * Return the document directory expected by the multicompany recopy workflow.
 	 *
 	 * @param CommonObject $object Object to inspect
 	 * @param int          $entity Entity owner
@@ -755,112 +970,38 @@ class TTELink
 		if ($entity <= 0) {
 			$entity = !empty($object->entity) ? (int) $object->entity : (int) $conf->entity;
 		}
-		$object->entity = (int) $entity;
-
-		if (function_exists('getMultidirOutput')) {
-			$module = $this->getMultidirModuleName($object);
-			$dir = getMultidirOutput($object, $module, 1);
-			if (!empty($dir) && strpos($dir, 'error-') !== 0) {
-				return $this->completeDocumentDirectoryWithRef($dir, $object);
-			}
-		}
-
-		$baseDir = $this->getObjectDocumentBaseDirectory($object, (int) $entity);
-		if (empty($baseDir)) {
+		$ref = $this->getSanitizedObjectRef($object);
+		$folder = $this->getObjectDocumentFolderName($object);
+		if (empty($ref) || empty($folder) || !defined('DOL_DATA_ROOT')) {
 			return '';
 		}
 
-		$subdir = '';
-		if (function_exists('get_exdir')) {
-			$subdir = get_exdir(0, 0, 0, 1, $object, !empty($object->element) ? $object->element : '');
+		$dir = rtrim(DOL_DATA_ROOT, '/');
+		if ((int) $entity > 1) {
+			$dir .= '/'.((int) $entity);
 		}
 
-		$dir = rtrim($baseDir, '/');
-		if (!empty($subdir)) {
-			$dir .= '/'.trim($subdir, '/');
-		}
-
-		return $this->completeDocumentDirectoryWithRef($dir, $object);
+		return $dir.'/'.$folder.'/'.$ref;
 	}
 
 	/**
-	 * Return the module name expected by getMultidirOutput.
+	 * Return the Dolibarr folder name used by the recopy workflow.
 	 *
 	 * @param CommonObject $object Object to inspect
-	 * @return string Module name or empty string for autodetection
+	 * @return string Folder name or empty string
 	 */
-	private function getMultidirModuleName($object)
+	private function getObjectDocumentFolderName($object)
 	{
 		$element = !empty($object->element) ? $object->element : '';
 
-		if ($element === 'facture') {
-			return 'invoice';
+		if (in_array($element, array('facture', 'invoice', 'invoice_supplier'), true)) {
+			return 'facture';
 		}
-		if ($element === 'invoice_supplier') {
-			return 'supplier_invoice';
-		}
-		if ($element === 'order_supplier') {
-			return 'supplier_order';
+		if (in_array($element, array('commande', 'order', 'order_supplier', 'commandefourn'), true)) {
+			return 'commande';
 		}
 
 		return '';
-	}
-
-	/**
-	 * Return a fallback base document directory for Dolibarr core objects.
-	 *
-	 * @param CommonObject $object Object to inspect
-	 * @param int          $entity Entity owner
-	 * @return string Full base directory path or empty string
-	 */
-	private function getObjectDocumentBaseDirectory($object, $entity)
-	{
-		global $conf;
-
-		$element = !empty($object->element) ? $object->element : '';
-
-		if ($element === 'commande' || $element === 'order') {
-			if (!empty($conf->commande->multidir_output[$entity])) return $conf->commande->multidir_output[$entity];
-			if (!empty($conf->order->multidir_output[$entity])) return $conf->order->multidir_output[$entity];
-			if (!empty($conf->commande->dir_output)) return $conf->commande->dir_output;
-			if (!empty($conf->order->dir_output)) return $conf->order->dir_output;
-		} elseif ($element === 'facture' || $element === 'invoice') {
-			if (!empty($conf->invoice->multidir_output[$entity])) return $conf->invoice->multidir_output[$entity];
-			if (!empty($conf->facture->multidir_output[$entity])) return $conf->facture->multidir_output[$entity];
-			if (!empty($conf->invoice->dir_output)) return $conf->invoice->dir_output;
-			if (!empty($conf->facture->dir_output)) return $conf->facture->dir_output;
-		} elseif ($element === 'order_supplier') {
-			if (!empty($conf->supplier_order->multidir_output[$entity])) return $conf->supplier_order->multidir_output[$entity];
-			if (!empty($conf->fournisseur->commande->multidir_output[$entity])) return $conf->fournisseur->commande->multidir_output[$entity];
-			if (!empty($conf->fournisseur->commande->dir_output)) return $conf->fournisseur->commande->dir_output;
-			if (!empty($conf->fournisseur->dir_output)) return rtrim($conf->fournisseur->dir_output, '/').'/commande';
-		} elseif ($element === 'invoice_supplier') {
-			if (!empty($conf->supplier_invoice->multidir_output[$entity])) return $conf->supplier_invoice->multidir_output[$entity];
-			if (!empty($conf->fournisseur->facture->multidir_output[$entity])) return $conf->fournisseur->facture->multidir_output[$entity];
-			if (!empty($conf->fournisseur->facture->dir_output)) return $conf->fournisseur->facture->dir_output;
-			if (!empty($conf->fournisseur->dir_output)) return rtrim($conf->fournisseur->dir_output, '/').'/facture';
-		}
-
-		return '';
-	}
-
-	/**
-	 * Ensure the document directory includes the object reference.
-	 *
-	 * @param string       $dir    Directory path
-	 * @param CommonObject $object Object to inspect
-	 * @return string Directory path
-	 */
-	private function completeDocumentDirectoryWithRef($dir, $object)
-	{
-		$ref = $this->getSanitizedObjectRef($object);
-		$dir = rtrim($dir, '/');
-
-		if (!empty($ref) && basename($dir) !== $ref) {
-			$dir .= '/'.$ref;
-		}
-
-		return $dir;
 	}
 
 	/**
