@@ -182,10 +182,22 @@ class Interfaceinterentitydocumentstrigger
 			return 0;
 		}
 		elseif ($action === 'PAYMENT_CUSTOMER_CREATE') {
+			if (!empty($conf->global->OFSOM_AUTO_CREATE_SUPPLIER_PAYMENT_FROM_CUSTOMER_PAYMENT)) {
+				$result = $this->syncSupplierPaymentFromCustomerPayment($object, $user);
+				if ($result < 0) {
+					return -1;
+				}
+			}
 			$this->syncCustomerPaymentInvoicePdfs($object);
 			return 0;
 		}
 		elseif ($action === 'PAYMENT_SUPPLIER_CREATE') {
+			if (!empty($conf->global->OFSOM_AUTO_CREATE_CUSTOMER_PAYMENT_FROM_SUPPLIER_PAYMENT)) {
+				$result = $this->syncCustomerPaymentFromSupplierPayment($object, $user);
+				if ($result < 0) {
+					return -1;
+				}
+			}
 			$this->syncSupplierPaymentInvoicePdfs($object);
 			return 0;
 		}
@@ -619,6 +631,771 @@ class Interfaceinterentitydocumentstrigger
 		}
 
 		return array();
+	}
+
+	/**
+	 * Create mirrored supplier payments from a customer payment on linked customer invoices.
+	 *
+	 * @param Paiement $payment Customer payment
+	 * @param User     $user    User
+	 * @return int <0 if KO, number of created supplier payments otherwise
+	 */
+	private function syncSupplierPaymentFromCustomerPayment($payment, $user)
+	{
+		global $conf;
+
+		if (!empty($GLOBALS['INTERENTITYDOCUMENTS_PAYMENT_SYNC_IN_PROGRESS'])) {
+			return 0;
+		}
+		if (empty($payment->id)) {
+			return 0;
+		}
+		$mirrorExists = $this->hasSupplierPaymentMirrorForCustomerPayment((int) $payment->id);
+		if ($mirrorExists < 0) {
+			return -1;
+		}
+		if ($mirrorExists > 0) {
+			dol_syslog('interentitydocuments: supplier payment mirror already exists for customer payment '.$payment->id, LOG_DEBUG);
+			return 0;
+		}
+
+		$amounts = $this->getPaymentAmounts($payment);
+		if (empty($amounts)) {
+			return 0;
+		}
+
+		dol_include_once('/fourn/class/fournisseur.facture.class.php');
+
+		$groups = array();
+		$linkedInvoiceFound = false;
+
+		foreach ($amounts as $customerInvoiceId => $amount) {
+			$customerInvoiceId = (int) $customerInvoiceId;
+			$amount = price2num((float) $amount, 'MT');
+			if ($customerInvoiceId <= 0 || $amount <= 0) {
+				if ($amount < 0) {
+					dol_syslog('interentitydocuments: negative customer payment amount ignored for invoice '.$customerInvoiceId, LOG_WARNING);
+				}
+				continue;
+			}
+
+			$supplierInvoiceId = $this->getSupplierInvoiceIdFromCustomerInvoiceId($customerInvoiceId);
+			if ($supplierInvoiceId < 0) {
+				return -1;
+			}
+			if ($supplierInvoiceId === 0) {
+				continue;
+			}
+
+			$linkedInvoiceFound = true;
+
+			$supplierInvoice = new FactureFournisseur($this->db);
+			if ($supplierInvoice->fetch($supplierInvoiceId) <= 0) {
+				$this->setError('InterentitySupplierPaymentMirrorMissingInvoice');
+				return -1;
+			}
+
+			$remainingAmount = $this->getSupplierInvoiceRemainingAmount($supplierInvoice);
+			if ($remainingAmount <= 0) {
+				dol_syslog('interentitydocuments: linked supplier invoice '.$supplierInvoice->id.' has no remaining amount to pay', LOG_WARNING);
+				continue;
+			}
+
+			$mirroredAmount = $amount;
+			if ($mirroredAmount > $remainingAmount) {
+				dol_syslog('interentitydocuments: customer payment amount capped from '.$mirroredAmount.' to '.$remainingAmount.' for supplier invoice '.$supplierInvoice->id, LOG_WARNING);
+				$mirroredAmount = $remainingAmount;
+			}
+			$mirroredAmount = price2num($mirroredAmount, 'MT');
+			if ($mirroredAmount <= 0) {
+				continue;
+			}
+
+			$targetEntity = !empty($supplierInvoice->entity) ? (int) $supplierInvoice->entity : (int) $conf->entity;
+			$targetSocid = !empty($supplierInvoice->socid) ? (int) $supplierInvoice->socid : 0;
+			if ($targetSocid <= 0) {
+				$this->setError('InterentitySupplierPaymentMirrorMissingThirdparty');
+				return -1;
+			}
+
+			$groupKey = $targetEntity.'-'.$targetSocid;
+			if (empty($groups[$groupKey])) {
+				$groups[$groupKey] = array(
+					'entity' => $targetEntity,
+					'socid' => $targetSocid,
+					'amounts' => array(),
+					'multicurrency_amounts' => array(),
+					'multicurrency_code' => array(),
+					'multicurrency_tx' => array(),
+				);
+			}
+
+			$invoiceId = (int) $supplierInvoice->id;
+			if (empty($groups[$groupKey]['amounts'][$invoiceId])) {
+				$groups[$groupKey]['amounts'][$invoiceId] = 0;
+				$groups[$groupKey]['multicurrency_amounts'][$invoiceId] = 0;
+			}
+
+			$groups[$groupKey]['amounts'][$invoiceId] = price2num($groups[$groupKey]['amounts'][$invoiceId] + $mirroredAmount, 'MT');
+			$groups[$groupKey]['multicurrency_amounts'][$invoiceId] = price2num($groups[$groupKey]['multicurrency_amounts'][$invoiceId] + $mirroredAmount, 'MT');
+			$groups[$groupKey]['multicurrency_code'][$invoiceId] = !empty($supplierInvoice->multicurrency_code) ? $supplierInvoice->multicurrency_code : $conf->currency;
+			$groups[$groupKey]['multicurrency_tx'][$invoiceId] = !empty($supplierInvoice->multicurrency_tx) ? (float) $supplierInvoice->multicurrency_tx : 1;
+		}
+
+		if (!$linkedInvoiceFound || empty($groups)) {
+			return 0;
+		}
+
+		$created = 0;
+		$previousGuard = !empty($GLOBALS['INTERENTITYDOCUMENTS_PAYMENT_SYNC_IN_PROGRESS']);
+		$GLOBALS['INTERENTITYDOCUMENTS_PAYMENT_SYNC_IN_PROGRESS'] = 1;
+
+		try {
+			foreach ($groups as $group) {
+				$result = $this->createSupplierPaymentMirrorGroup($payment, $group, $user);
+				if ($result < 0) {
+					return -1;
+				}
+				$created++;
+			}
+		} finally {
+			if ($previousGuard) {
+				$GLOBALS['INTERENTITYDOCUMENTS_PAYMENT_SYNC_IN_PROGRESS'] = 1;
+			} else {
+				unset($GLOBALS['INTERENTITYDOCUMENTS_PAYMENT_SYNC_IN_PROGRESS']);
+			}
+		}
+
+		return $created;
+	}
+
+	/**
+	 * Return linked supplier invoice id for a customer invoice.
+	 *
+	 * @param int $customerInvoiceId Customer invoice id
+	 * @return int <0 on SQL error, 0 if no link, supplier invoice id otherwise
+	 */
+	private function getSupplierInvoiceIdFromCustomerInvoiceId($customerInvoiceId)
+	{
+		$sourceTypes = array('facture', 'invoice');
+		$targetTypes = array('invoice_supplier', 'supplier_invoice', 'facture_fournisseur', 'facture_fourn');
+
+		$sql = 'SELECT fk_target';
+		$sql .= ' FROM '.MAIN_DB_PREFIX.'element_element';
+		$sql .= ' WHERE fk_source = '.((int) $customerInvoiceId);
+		$sql .= ' AND sourcetype IN ('.$this->getSqlQuotedList($sourceTypes).')';
+		$sql .= ' AND targettype IN ('.$this->getSqlQuotedList($targetTypes).')';
+		$sql .= ' ORDER BY rowid DESC';
+		$sql .= ' LIMIT 1';
+
+		$resql = $this->db->query($sql);
+		if (!$resql) {
+			$this->setError($this->db->lasterror());
+			return -1;
+		}
+		if ($this->db->num_rows($resql) <= 0) {
+			return 0;
+		}
+
+		$obj = $this->db->fetch_object($resql);
+		return !empty($obj->fk_target) ? (int) $obj->fk_target : 0;
+	}
+
+	/**
+	 * Create a supplier payment for one target entity / supplier third party group.
+	 *
+	 * @param Paiement $customerPayment Customer payment
+	 * @param array    $group           Payment group
+	 * @param User     $user            User
+	 * @return int <0 if KO, >0 if OK
+	 */
+	private function createSupplierPaymentMirrorGroup($customerPayment, array $group, $user)
+	{
+		global $conf, $langs;
+
+		dol_include_once('/fourn/class/paiementfourn.class.php');
+
+		$langs->load('interentitydocuments@interentitydocuments');
+
+		$previousEntity = (int) $conf->entity;
+		$targetEntity = (int) $group['entity'];
+		$conf->entity = $targetEntity;
+
+		try {
+			$bankAccountId = $this->getSupplierPaymentBankAccountIdForEntity($targetEntity);
+
+			$supplierPayment = new PaiementFourn($this->db);
+			$supplierPayment->datepaye = $this->getPaymentDate($customerPayment);
+			$supplierPayment->paiementid = $this->getPaymentModeId($customerPayment);
+			$supplierPayment->fk_paiement = $supplierPayment->paiementid;
+			$supplierPayment->num_payment = $this->getPaymentNumber($customerPayment);
+			$supplierPayment->num_paiement = $supplierPayment->num_payment;
+			$supplierPayment->amounts = $group['amounts'];
+			$supplierPayment->multicurrency_amounts = $group['multicurrency_amounts'];
+			$supplierPayment->multicurrency_code = $group['multicurrency_code'];
+			$supplierPayment->multicurrency_tx = $group['multicurrency_tx'];
+			$supplierPayment->note_private = $langs->trans('InterentitySupplierPaymentMirrorNote', $this->getPaymentDisplayRef($customerPayment));
+			if ($bankAccountId > 0) {
+				$supplierPayment->fk_account = $bankAccountId;
+			}
+
+			$result = $supplierPayment->create($user, 1);
+			if ($result <= 0) {
+				$this->setError(!empty($supplierPayment->error) ? $supplierPayment->error : 'InterentitySupplierPaymentMirrorFailed');
+				if (!empty($supplierPayment->errors) && is_array($supplierPayment->errors)) {
+					$this->errors = array_merge($this->errors, $supplierPayment->errors);
+				}
+				return -1;
+			}
+
+			$linkResult = $this->linkSupplierPaymentMirror((int) $customerPayment->id, (int) $supplierPayment->id);
+			if ($linkResult < 0) {
+				return -1;
+			}
+
+			$bankEnabled = function_exists('isModEnabled') ? isModEnabled('bank') : !empty($conf->bank->enabled);
+			if ($bankAccountId > 0 && $bankEnabled) {
+				$bankResult = $supplierPayment->addPaymentToBank($user, 'payment_supplier', '(SupplierInvoicePayment)', $bankAccountId, '', '');
+				if ($bankResult < 0) {
+					dol_syslog('interentitydocuments: failed to add mirrored supplier payment '.$supplierPayment->id.' to bank account '.$bankAccountId.': '.$supplierPayment->error, LOG_WARNING);
+				}
+			}
+		} finally {
+			$conf->entity = $previousEntity;
+		}
+
+		return 1;
+	}
+
+	/**
+	 * Return remaining amount to pay on a supplier invoice.
+	 *
+	 * @param FactureFournisseur $invoice Supplier invoice
+	 * @return float
+	 */
+	private function getSupplierInvoiceRemainingAmount($invoice)
+	{
+		$paid = method_exists($invoice, 'getSommePaiement') ? (float) $invoice->getSommePaiement() : 0;
+		$creditNotes = method_exists($invoice, 'getSumCreditNotesUsed') ? (float) $invoice->getSumCreditNotesUsed() : 0;
+		$deposits = method_exists($invoice, 'getSumDepositsUsed') ? (float) $invoice->getSumDepositsUsed() : 0;
+		$remaining = price2num((float) $invoice->total_ttc - $paid - $creditNotes - $deposits, 'MT');
+
+		return $remaining > 0 ? $remaining : 0;
+	}
+
+	/**
+	 * Check if a customer payment already has a mirrored supplier payment link.
+	 *
+	 * @param int $customerPaymentId Customer payment id
+	 * @return int <0 on SQL error, 0 if no mirror, >0 if mirror exists
+	 */
+	private function hasSupplierPaymentMirrorForCustomerPayment($customerPaymentId)
+	{
+		$sql = 'SELECT rowid';
+		$sql .= ' FROM '.MAIN_DB_PREFIX.'element_element';
+		$sql .= ' WHERE fk_source = '.((int) $customerPaymentId);
+		$sql .= " AND sourcetype = 'payment'";
+		$sql .= " AND targettype = 'payment_supplier'";
+		$sql .= ' LIMIT 1';
+
+		$resql = $this->db->query($sql);
+		if (!$resql) {
+			$this->setError($this->db->lasterror());
+			return -1;
+		}
+
+		return $this->db->num_rows($resql) > 0 ? 1 : 0;
+	}
+
+	/**
+	 * Link a customer payment to its mirrored supplier payment.
+	 *
+	 * @param int $customerPaymentId Customer payment id
+	 * @param int $supplierPaymentId Supplier payment id
+	 * @return int <0 if KO, >0 if OK
+	 */
+	private function linkSupplierPaymentMirror($customerPaymentId, $supplierPaymentId)
+	{
+		$sql = 'SELECT rowid';
+		$sql .= ' FROM '.MAIN_DB_PREFIX.'element_element';
+		$sql .= ' WHERE fk_source = '.((int) $customerPaymentId);
+		$sql .= " AND sourcetype = 'payment'";
+		$sql .= ' AND fk_target = '.((int) $supplierPaymentId);
+		$sql .= " AND targettype = 'payment_supplier'";
+		$sql .= ' LIMIT 1';
+
+		$resql = $this->db->query($sql);
+		if (!$resql) {
+			$this->setError($this->db->lasterror());
+			return -1;
+		}
+		if ($this->db->num_rows($resql) > 0) {
+			return 1;
+		}
+
+		$sql = 'INSERT INTO '.MAIN_DB_PREFIX.'element_element (fk_source, sourcetype, fk_target, targettype)';
+		$sql .= ' VALUES ('.((int) $customerPaymentId).", 'payment', ".((int) $supplierPaymentId).", 'payment_supplier')";
+
+		$resql = $this->db->query($sql);
+		if (!$resql) {
+			$this->setError($this->db->lasterror());
+			return -1;
+		}
+
+		return 1;
+	}
+
+	/**
+	 * Create mirrored customer payments from a supplier payment on linked supplier invoices.
+	 *
+	 * @param PaiementFourn $payment Supplier payment
+	 * @param User          $user    User
+	 * @return int <0 if KO, number of created customer payments otherwise
+	 */
+	private function syncCustomerPaymentFromSupplierPayment($payment, $user)
+	{
+		global $conf;
+
+		if (!empty($GLOBALS['INTERENTITYDOCUMENTS_PAYMENT_SYNC_IN_PROGRESS'])) {
+			return 0;
+		}
+		if (empty($payment->id)) {
+			return 0;
+		}
+		$mirrorExists = $this->hasCustomerPaymentMirrorForSupplierPayment((int) $payment->id);
+		if ($mirrorExists < 0) {
+			return -1;
+		}
+		if ($mirrorExists > 0) {
+			dol_syslog('interentitydocuments: customer payment mirror already exists for supplier payment '.$payment->id, LOG_DEBUG);
+			return 0;
+		}
+
+		$amounts = $this->getPaymentAmounts($payment);
+		if (empty($amounts)) {
+			return 0;
+		}
+
+		dol_include_once('/compta/facture/class/facture.class.php');
+
+		$groups = array();
+		$linkedInvoiceFound = false;
+
+		foreach ($amounts as $supplierInvoiceId => $amount) {
+			$supplierInvoiceId = (int) $supplierInvoiceId;
+			$amount = price2num((float) $amount, 'MT');
+			if ($supplierInvoiceId <= 0 || $amount <= 0) {
+				if ($amount < 0) {
+					dol_syslog('interentitydocuments: negative supplier payment amount ignored for invoice '.$supplierInvoiceId, LOG_WARNING);
+				}
+				continue;
+			}
+
+			$customerInvoiceId = $this->getCustomerInvoiceIdFromSupplierInvoiceId($supplierInvoiceId);
+			if ($customerInvoiceId < 0) {
+				return -1;
+			}
+			if ($customerInvoiceId === 0) {
+				continue;
+			}
+
+			$linkedInvoiceFound = true;
+
+			$customerInvoice = new Facture($this->db);
+			if ($customerInvoice->fetch($customerInvoiceId) <= 0) {
+				$this->setError('InterentityCustomerPaymentMirrorMissingInvoice');
+				return -1;
+			}
+
+			$remainingAmount = $this->getCustomerInvoiceRemainingAmount($customerInvoice);
+			if ($remainingAmount <= 0) {
+				dol_syslog('interentitydocuments: linked customer invoice '.$customerInvoice->id.' has no remaining amount to pay', LOG_WARNING);
+				continue;
+			}
+
+			$mirroredAmount = $amount;
+			if ($mirroredAmount > $remainingAmount) {
+				dol_syslog('interentitydocuments: supplier payment amount capped from '.$mirroredAmount.' to '.$remainingAmount.' for customer invoice '.$customerInvoice->id, LOG_WARNING);
+				$mirroredAmount = $remainingAmount;
+			}
+			$mirroredAmount = price2num($mirroredAmount, 'MT');
+			if ($mirroredAmount <= 0) {
+				continue;
+			}
+
+			$targetEntity = !empty($customerInvoice->entity) ? (int) $customerInvoice->entity : (int) $conf->entity;
+			$targetSocid = !empty($customerInvoice->socid) ? (int) $customerInvoice->socid : 0;
+			if ($targetSocid <= 0) {
+				$this->setError('InterentityCustomerPaymentMirrorMissingThirdparty');
+				return -1;
+			}
+
+			$groupKey = $targetEntity.'-'.$targetSocid;
+			if (empty($groups[$groupKey])) {
+				$groups[$groupKey] = array(
+					'entity' => $targetEntity,
+					'socid' => $targetSocid,
+					'amounts' => array(),
+					'multicurrency_amounts' => array(),
+					'multicurrency_code' => array(),
+					'multicurrency_tx' => array(),
+				);
+			}
+
+			$invoiceId = (int) $customerInvoice->id;
+			if (empty($groups[$groupKey]['amounts'][$invoiceId])) {
+				$groups[$groupKey]['amounts'][$invoiceId] = 0;
+				$groups[$groupKey]['multicurrency_amounts'][$invoiceId] = 0;
+			}
+
+			$groups[$groupKey]['amounts'][$invoiceId] = price2num($groups[$groupKey]['amounts'][$invoiceId] + $mirroredAmount, 'MT');
+			$groups[$groupKey]['multicurrency_amounts'][$invoiceId] = price2num($groups[$groupKey]['multicurrency_amounts'][$invoiceId] + $mirroredAmount, 'MT');
+			$groups[$groupKey]['multicurrency_code'][$invoiceId] = !empty($customerInvoice->multicurrency_code) ? $customerInvoice->multicurrency_code : $conf->currency;
+			$groups[$groupKey]['multicurrency_tx'][$invoiceId] = !empty($customerInvoice->multicurrency_tx) ? (float) $customerInvoice->multicurrency_tx : 1;
+		}
+
+		if (!$linkedInvoiceFound || empty($groups)) {
+			return 0;
+		}
+
+		$created = 0;
+		$previousGuard = !empty($GLOBALS['INTERENTITYDOCUMENTS_PAYMENT_SYNC_IN_PROGRESS']);
+		$GLOBALS['INTERENTITYDOCUMENTS_PAYMENT_SYNC_IN_PROGRESS'] = 1;
+
+		try {
+			foreach ($groups as $group) {
+				$result = $this->createCustomerPaymentMirrorGroup($payment, $group, $user);
+				if ($result < 0) {
+					return -1;
+				}
+				$created++;
+			}
+		} finally {
+			if ($previousGuard) {
+				$GLOBALS['INTERENTITYDOCUMENTS_PAYMENT_SYNC_IN_PROGRESS'] = 1;
+			} else {
+				unset($GLOBALS['INTERENTITYDOCUMENTS_PAYMENT_SYNC_IN_PROGRESS']);
+			}
+		}
+
+		return $created;
+	}
+
+	/**
+	 * Return linked source customer invoice id for a supplier invoice.
+	 *
+	 * @param int $supplierInvoiceId Supplier invoice id
+	 * @return int <0 on SQL error, 0 if no link, customer invoice id otherwise
+	 */
+	private function getCustomerInvoiceIdFromSupplierInvoiceId($supplierInvoiceId)
+	{
+		$sourceTypes = array('facture', 'invoice');
+		$targetTypes = array('invoice_supplier', 'supplier_invoice', 'facture_fournisseur', 'facture_fourn');
+
+		$sql = 'SELECT fk_source';
+		$sql .= ' FROM '.MAIN_DB_PREFIX.'element_element';
+		$sql .= ' WHERE fk_target = '.((int) $supplierInvoiceId);
+		$sql .= ' AND sourcetype IN ('.$this->getSqlQuotedList($sourceTypes).')';
+		$sql .= ' AND targettype IN ('.$this->getSqlQuotedList($targetTypes).')';
+		$sql .= ' ORDER BY rowid DESC';
+		$sql .= ' LIMIT 1';
+
+		$resql = $this->db->query($sql);
+		if (!$resql) {
+			$this->setError($this->db->lasterror());
+			return -1;
+		}
+		if ($this->db->num_rows($resql) <= 0) {
+			return 0;
+		}
+
+		$obj = $this->db->fetch_object($resql);
+		return !empty($obj->fk_source) ? (int) $obj->fk_source : 0;
+	}
+
+	/**
+	 * Create a customer payment for one source entity / third party group.
+	 *
+	 * @param PaiementFourn $supplierPayment Supplier payment
+	 * @param array         $group           Payment group
+	 * @param User          $user            User
+	 * @return int <0 if KO, >0 if OK
+	 */
+	private function createCustomerPaymentMirrorGroup($supplierPayment, array $group, $user)
+	{
+		global $conf, $langs;
+
+		dol_include_once('/compta/paiement/class/paiement.class.php');
+
+		$langs->load('interentitydocuments@interentitydocuments');
+
+		$previousEntity = (int) $conf->entity;
+		$targetEntity = (int) $group['entity'];
+		$conf->entity = $targetEntity;
+
+		try {
+			$bankAccountId = $this->getCustomerPaymentBankAccountIdForEntity($targetEntity);
+
+			$customerPayment = new Paiement($this->db);
+			$customerPayment->datepaye = $this->getPaymentDate($supplierPayment);
+			$customerPayment->paiementid = $this->getPaymentModeId($supplierPayment);
+			$customerPayment->num_payment = $this->getPaymentNumber($supplierPayment);
+			$customerPayment->num_paiement = $customerPayment->num_payment;
+			$customerPayment->amounts = $group['amounts'];
+			$customerPayment->multicurrency_amounts = $group['multicurrency_amounts'];
+			$customerPayment->multicurrency_code = $group['multicurrency_code'];
+			$customerPayment->multicurrency_tx = $group['multicurrency_tx'];
+			$customerPayment->note_private = $langs->trans('InterentityCustomerPaymentMirrorNote', $this->getPaymentDisplayRef($supplierPayment));
+			if ($bankAccountId > 0) {
+				$customerPayment->fk_account = $bankAccountId;
+			}
+
+			$result = $customerPayment->create($user, 1);
+			if ($result <= 0) {
+				$this->setError(!empty($customerPayment->error) ? $customerPayment->error : 'InterentityCustomerPaymentMirrorFailed');
+				if (!empty($customerPayment->errors) && is_array($customerPayment->errors)) {
+					$this->errors = array_merge($this->errors, $customerPayment->errors);
+				}
+				return -1;
+			}
+
+			$linkResult = $this->linkCustomerPaymentMirror((int) $supplierPayment->id, (int) $customerPayment->id);
+			if ($linkResult < 0) {
+				return -1;
+			}
+
+			$bankEnabled = function_exists('isModEnabled') ? isModEnabled('bank') : !empty($conf->bank->enabled);
+			if ($bankAccountId > 0 && $bankEnabled) {
+				$bankResult = $customerPayment->addPaymentToBank($user, 'payment', '(CustomerInvoicePayment)', $bankAccountId, '', '');
+				if ($bankResult < 0) {
+					dol_syslog('interentitydocuments: failed to add mirrored customer payment '.$customerPayment->id.' to bank account '.$bankAccountId.': '.$customerPayment->error, LOG_WARNING);
+				}
+			}
+		} finally {
+			$conf->entity = $previousEntity;
+		}
+
+		return 1;
+	}
+
+	/**
+	 * Return remaining amount to pay on a customer invoice.
+	 *
+	 * @param Facture $invoice Customer invoice
+	 * @return float
+	 */
+	private function getCustomerInvoiceRemainingAmount($invoice)
+	{
+		$paid = method_exists($invoice, 'getSommePaiement') ? (float) $invoice->getSommePaiement() : 0;
+		$creditNotes = method_exists($invoice, 'getSumCreditNotesUsed') ? (float) $invoice->getSumCreditNotesUsed() : 0;
+		$deposits = method_exists($invoice, 'getSumDepositsUsed') ? (float) $invoice->getSumDepositsUsed() : 0;
+		$remaining = price2num((float) $invoice->total_ttc - $paid - $creditNotes - $deposits, 'MT');
+
+		return $remaining > 0 ? $remaining : 0;
+	}
+
+	/**
+	 * Check if a supplier payment already has a mirrored customer payment link.
+	 *
+	 * @param int $supplierPaymentId Supplier payment id
+	 * @return int <0 on SQL error, 0 if no mirror, >0 if mirror exists
+	 */
+	private function hasCustomerPaymentMirrorForSupplierPayment($supplierPaymentId)
+	{
+		$sql = 'SELECT rowid';
+		$sql .= ' FROM '.MAIN_DB_PREFIX.'element_element';
+		$sql .= ' WHERE fk_source = '.((int) $supplierPaymentId);
+		$sql .= " AND sourcetype = 'payment_supplier'";
+		$sql .= " AND targettype = 'payment'";
+		$sql .= ' LIMIT 1';
+
+		$resql = $this->db->query($sql);
+		if (!$resql) {
+			$this->setError($this->db->lasterror());
+			return -1;
+		}
+
+		return $this->db->num_rows($resql) > 0 ? 1 : 0;
+	}
+
+	/**
+	 * Link a supplier payment to its mirrored customer payment.
+	 *
+	 * @param int $supplierPaymentId Supplier payment id
+	 * @param int $customerPaymentId Customer payment id
+	 * @return int <0 if KO, >0 if OK
+	 */
+	private function linkCustomerPaymentMirror($supplierPaymentId, $customerPaymentId)
+	{
+		$sql = 'SELECT rowid';
+		$sql .= ' FROM '.MAIN_DB_PREFIX.'element_element';
+		$sql .= ' WHERE fk_source = '.((int) $supplierPaymentId);
+		$sql .= " AND sourcetype = 'payment_supplier'";
+		$sql .= ' AND fk_target = '.((int) $customerPaymentId);
+		$sql .= " AND targettype = 'payment'";
+		$sql .= ' LIMIT 1';
+
+		$resql = $this->db->query($sql);
+		if (!$resql) {
+			$this->setError($this->db->lasterror());
+			return -1;
+		}
+		if ($this->db->num_rows($resql) > 0) {
+			return 1;
+		}
+
+		$sql = 'INSERT INTO '.MAIN_DB_PREFIX.'element_element (fk_source, sourcetype, fk_target, targettype)';
+		$sql .= ' VALUES ('.((int) $supplierPaymentId).", 'payment_supplier', ".((int) $customerPaymentId).", 'payment')";
+
+		$resql = $this->db->query($sql);
+		if (!$resql) {
+			$this->setError($this->db->lasterror());
+			return -1;
+		}
+
+		return 1;
+	}
+
+	/**
+	 * Return configured customer payment bank account for an entity.
+	 *
+	 * @param int $entity Entity id
+	 * @return int
+	 */
+	private function getCustomerPaymentBankAccountIdForEntity($entity)
+	{
+		return $this->getIntegerConstantForEntity('OFSOM_CUSTOMER_PAYMENT_BANK_ACCOUNT_ID', $entity);
+	}
+
+	/**
+	 * Return configured supplier payment bank account for an entity.
+	 *
+	 * @param int $entity Entity id
+	 * @return int
+	 */
+	private function getSupplierPaymentBankAccountIdForEntity($entity)
+	{
+		return $this->getIntegerConstantForEntity('OFSOM_SUPPLIER_PAYMENT_BANK_ACCOUNT_ID', $entity);
+	}
+
+	/**
+	 * Return an integer constant value for an entity.
+	 *
+	 * @param string $name   Constant name
+	 * @param int    $entity Entity id
+	 * @return int
+	 */
+	private function getIntegerConstantForEntity($name, $entity)
+	{
+		$sql = 'SELECT value';
+		$sql .= ' FROM '.MAIN_DB_PREFIX.'const';
+		$sql .= " WHERE name = '".$this->db->escape($name)."'";
+		$sql .= ' AND entity = '.((int) $entity);
+		$sql .= ' LIMIT 1';
+
+		$resql = $this->db->query($sql);
+		if (!$resql) {
+			dol_syslog('interentitydocuments: unable to read constant '.$name.' for entity '.$entity.': '.$this->db->lasterror(), LOG_WARNING);
+			return 0;
+		}
+		if ($this->db->num_rows($resql) <= 0) {
+			return 0;
+		}
+
+		$obj = $this->db->fetch_object($resql);
+		return !empty($obj->value) ? (int) $obj->value : 0;
+	}
+
+	/**
+	 * Return payment date from a payment object.
+	 *
+	 * @param CommonObject $payment Payment
+	 * @return int
+	 */
+	private function getPaymentDate($payment)
+	{
+		if (!empty($payment->datepaye)) {
+			return $payment->datepaye;
+		}
+		if (!empty($payment->date_payment)) {
+			return $payment->date_payment;
+		}
+		if (!empty($payment->date)) {
+			return $payment->date;
+		}
+
+		return dol_now();
+	}
+
+	/**
+	 * Return payment mode id from a payment object.
+	 *
+	 * @param CommonObject $payment Payment
+	 * @return int
+	 */
+	private function getPaymentModeId($payment)
+	{
+		if (!empty($payment->paiementid)) {
+			return (int) $payment->paiementid;
+		}
+		if (!empty($payment->fk_paiement)) {
+			return (int) $payment->fk_paiement;
+		}
+
+		return 0;
+	}
+
+	/**
+	 * Return payment number from a payment object.
+	 *
+	 * @param CommonObject $payment Payment
+	 * @return string
+	 */
+	private function getPaymentNumber($payment)
+	{
+		if (!empty($payment->num_payment)) {
+			return $payment->num_payment;
+		}
+		if (!empty($payment->num_paiement)) {
+			return $payment->num_paiement;
+		}
+		if (!empty($payment->ref)) {
+			return $payment->ref;
+		}
+
+		return !empty($payment->id) ? 'PAY-'.$payment->id : '';
+	}
+
+	/**
+	 * Return a readable payment reference for logs and notes.
+	 *
+	 * @param CommonObject $payment Payment
+	 * @return string
+	 */
+	private function getPaymentDisplayRef($payment)
+	{
+		$ref = $this->getPaymentNumber($payment);
+		if (!empty($ref)) {
+			return $ref;
+		}
+
+		return !empty($payment->id) ? '#'.$payment->id : '';
+	}
+
+	/**
+	 * Quote a string list for a SQL IN condition.
+	 *
+	 * @param array $values Values
+	 * @return string
+	 */
+	private function getSqlQuotedList(array $values)
+	{
+		$quoted = array();
+		foreach ($values as $value) {
+			$quoted[] = "'".$this->db->escape($value)."'";
+		}
+
+		return implode(',', $quoted);
 	}
 
 	/**

@@ -42,6 +42,14 @@ if ($action == 'setconststatus') {
 	dolibarr_set_const($db, 'OFSOM_STATUS', GETPOST('OFSOM_STATUS'), 'chaine', 1, '', $conf->entity);
 }
 
+if ($action == 'setcustomerpaymentbankaccount') {
+	dolibarr_set_const($db, 'OFSOM_CUSTOMER_PAYMENT_BANK_ACCOUNT_ID', GETPOST('OFSOM_CUSTOMER_PAYMENT_BANK_ACCOUNT_ID', 'int'), 'chaine', 0, '', $conf->entity);
+}
+
+if ($action == 'setsupplierpaymentbankaccount') {
+	dolibarr_set_const($db, 'OFSOM_SUPPLIER_PAYMENT_BANK_ACCOUNT_ID', GETPOST('OFSOM_SUPPLIER_PAYMENT_BANK_ACCOUNT_ID', 'int'), 'chaine', 0, '', $conf->entity);
+}
+
 if ($action == 'save') {
 	$TLine = GETPOST('TLine', 'array');
 	if (!empty($TLine)) {
@@ -173,6 +181,8 @@ $TOptions = array(
 	'OFSOM_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED' => $langs->trans('OFSOM_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED'),
 	'OFSOM_AUTO_CREATE_SUPPLIER_INVOICE'        => $langs->trans('OFSOM_AUTO_CREATE_SUPPLIER_INVOICE'),
 	'OFSOM_AUTO_CREATE_SUPPLIER_ORDER_FROM_CUSTOMER_ORDER' => $langs->trans('OFSOM_AUTO_CREATE_SUPPLIER_ORDER_FROM_CUSTOMER_ORDER'),
+	'OFSOM_AUTO_CREATE_CUSTOMER_PAYMENT_FROM_SUPPLIER_PAYMENT' => $langs->trans('OFSOM_AUTO_CREATE_CUSTOMER_PAYMENT_FROM_SUPPLIER_PAYMENT'),
+	'OFSOM_AUTO_CREATE_SUPPLIER_PAYMENT_FROM_CUSTOMER_PAYMENT' => $langs->trans('OFSOM_AUTO_CREATE_SUPPLIER_PAYMENT_FROM_CUSTOMER_PAYMENT'),
 );
 
 foreach ($TOptions as $confkey => $label) {
@@ -182,6 +192,56 @@ foreach ($TOptions as $confkey => $label) {
 	print '<td>' . ajax_constantonoff($confkey) . '</td>';
 	print '</tr>';
 }
+
+$selectedCustomerPaymentBankAccountId = function_exists('getDolGlobalInt') ? getDolGlobalInt('OFSOM_CUSTOMER_PAYMENT_BANK_ACCOUNT_ID') : (!empty($conf->global->OFSOM_CUSTOMER_PAYMENT_BANK_ACCOUNT_ID) ? (int) $conf->global->OFSOM_CUSTOMER_PAYMENT_BANK_ACCOUNT_ID : 0);
+$selectedSupplierPaymentBankAccountId = function_exists('getDolGlobalInt') ? getDolGlobalInt('OFSOM_SUPPLIER_PAYMENT_BANK_ACCOUNT_ID') : (!empty($conf->global->OFSOM_SUPPLIER_PAYMENT_BANK_ACCOUNT_ID) ? (int) $conf->global->OFSOM_SUPPLIER_PAYMENT_BANK_ACCOUNT_ID : 0);
+$bankAccountOptions = array(0 => $langs->trans('None'));
+$bankEnabled = function_exists('isModEnabled') ? isModEnabled('bank') : !empty($conf->bank->enabled);
+if ($bankEnabled) {
+	$entityFilter = function_exists('getEntity') ? getEntity('bank_account') : (string) ((int) $conf->entity);
+	$sql = 'SELECT rowid, ref, label';
+	$sql .= ' FROM ' . MAIN_DB_PREFIX . 'bank_account';
+	$sql .= ' WHERE entity IN (' . $entityFilter . ')';
+	$sql .= ' AND clos = 0';
+	$sql .= ' ORDER BY label, ref';
+	$resql = $db->query($sql);
+	if ($resql) {
+		while ($obj = $db->fetch_object($resql)) {
+			$label = trim((!empty($obj->ref) ? $obj->ref . ' - ' : '') . $obj->label);
+			$bankAccountOptions[(int) $obj->rowid] = $label;
+		}
+	} else {
+		dol_syslog('interentitydocuments: unable to load bank accounts for setup: ' . $db->lasterror(), LOG_WARNING);
+	}
+}
+
+print '<form method="post" action="' . $_SERVER['PHP_SELF'] . '" enctype="multipart/form-data">';
+print '<input type="hidden" name="token" value="' . newToken() . '">';
+print '<input type="hidden" name="action" value="setcustomerpaymentbankaccount">';
+print '<tr class="oddeven"><td>' . $langs->trans('OFSOM_CUSTOMER_PAYMENT_BANK_ACCOUNT_ID') . '</td>';
+print '<td width="20">&nbsp;</td>';
+print '<td align="left">';
+print $form->selectarray('OFSOM_CUSTOMER_PAYMENT_BANK_ACCOUNT_ID', $bankAccountOptions, $selectedCustomerPaymentBankAccountId, 0, 0, 0, '', 0, 0, 0, '', 'minwidth300');
+if (function_exists('ajax_combobox')) {
+	print ajax_combobox('OFSOM_CUSTOMER_PAYMENT_BANK_ACCOUNT_ID');
+}
+print ' <input type="submit" class="button" value="' . $langs->trans('Save') . '">';
+print '</td></tr>';
+print '</form>';
+
+print '<form method="post" action="' . $_SERVER['PHP_SELF'] . '" enctype="multipart/form-data">';
+print '<input type="hidden" name="token" value="' . newToken() . '">';
+print '<input type="hidden" name="action" value="setsupplierpaymentbankaccount">';
+print '<tr class="oddeven"><td>' . $langs->trans('OFSOM_SUPPLIER_PAYMENT_BANK_ACCOUNT_ID') . '</td>';
+print '<td width="20">&nbsp;</td>';
+print '<td align="left">';
+print $form->selectarray('OFSOM_SUPPLIER_PAYMENT_BANK_ACCOUNT_ID', $bankAccountOptions, $selectedSupplierPaymentBankAccountId, 0, 0, 0, '', 0, 0, 0, '', 'minwidth300');
+if (function_exists('ajax_combobox')) {
+	print ajax_combobox('OFSOM_SUPPLIER_PAYMENT_BANK_ACCOUNT_ID');
+}
+print ' <input type="submit" class="button" value="' . $langs->trans('Save') . '">';
+print '</td></tr>';
+print '</form>';
 
 print '</table>';
 
