@@ -18,7 +18,7 @@
 
 /**
  * 	\file		admin/about.php
- * 	\ingroup	mymodule
+ * 	\ingroup	interentitydocuments
  * 	\brief		This file is an example about page
  * 				Put some comments here
  */
@@ -50,7 +50,7 @@ $action = GETPOST('action', 'alpha');
 /*
  * View
  */
-$page_name = "MyModuleAbout";
+$page_name = "interentitydocumentsAbout";
 llxHeader('', $langs->trans($page_name));
 
 // Subheader
@@ -59,21 +59,21 @@ $linkback = '<a href="' . DOL_URL_ROOT . '/admin/modules.php">'
 print_fiche_titre($langs->trans($page_name), $linkback);
 
 // Configuration header
-$head = mymoduleAdminPrepareHead();
+$head = interentitydocumentsAdminPrepareHead();
 dol_fiche_head(
     $head,
     'about',
-    $langs->trans("Module10000Name"),
+    $langs->trans("Module450020Name"),
     0,
-    'mymodule@mymodule'
+    'interentitydocuments@interentitydocuments'
 );
 
 // About page goes here
-echo $langs->trans("MyModuleAboutPage");
+echo $langs->trans("interentitydocumentsAboutPage");
 
 echo '<br>';
 
-$buffer = file_get_contents(dol_buildpath('/mymodule/README.md', 0));
+$buffer = file_get_contents(dol_buildpath('/interentitydocuments/README.md', 0));
 echo Markdown($buffer);
 
 echo '<br>',
