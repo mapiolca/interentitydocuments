@@ -351,6 +351,9 @@ class TTELink
 			return -6;
 		}
 
+		$fi->entity = (int) $toEntity;
+		$this->copySourcePdfToTargetDocuments($facture, $fi, (int) $toEntity);
+
 		return $invoiceCreatedRes;
 	}
 
@@ -414,9 +417,11 @@ class TTELink
 					$delRes = $o->delete($user);
 					if ($delRes < 0) {
 						$this->error = $o->error;
+						$conf->entity = $previous_entity;
 						return -3;
 					}
 				} else {
+					$conf->entity = $previous_entity;
 					return -2;
 				}
 
@@ -472,6 +477,7 @@ class TTELink
 			$orderCreatedRes = $o->create($user);
 
 			if ($orderCreatedRes < 0) {
+				if (!empty($conf->global->OFSOM_DONT_FORCE_BUY_PRICE_WITH_SELL_PRICE)) $conf->global->ForceBuyingPriceIfNull = $oldval;
 				$this->error = $o->error;
 				return -4;
 			} else {
@@ -532,6 +538,9 @@ class TTELink
 				if (!$res) {
 					return -6;
 				}
+
+				$o->entity = (int) $toEntity;
+				$this->copySourcePdfToTargetDocuments($cf, $o, (int) $toEntity);
 			}
 
 			if (!empty($conf->global->OFSOM_DONT_FORCE_BUY_PRICE_WITH_SELL_PRICE)) $conf->global->ForceBuyingPriceIfNull = $oldval;
@@ -616,5 +625,344 @@ class TTELink
 		}
 
 		return 0;
+	}
+
+	/**
+	 * Generate the source object's PDF and copy it into the linked target object's document directory.
+	 *
+	 * The copy is deliberately non-blocking for the business clone because the clone flow is not transactional.
+	 * Errors are logged and the linked object remains available even when no PDF model is configured.
+	 *
+	 * @param CommonObject $sourceObject Source object used to generate the PDF
+	 * @param CommonObject $targetObject Target linked object that receives the PDF copy
+	 * @param int          $targetEntity Entity that owns the target object
+	 * @return int <0 if copy failed, 0 if no PDF was generated/found, >0 if copied
+	 */
+	private function copySourcePdfToTargetDocuments($sourceObject, $targetObject, $targetEntity)
+	{
+		global $conf;
+
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/files.lib.php';
+
+		if (!is_object($sourceObject) || !is_object($targetObject) || !method_exists($sourceObject, 'generateDocument')) {
+			return 0;
+		}
+
+		$sourceEntity = !empty($sourceObject->entity) ? (int) $sourceObject->entity : (int) $conf->entity;
+		$previousEntity = (int) $conf->entity;
+		$sourceFile = $this->getMainDocumentFullPath($sourceObject);
+
+		$conf->entity = $sourceEntity;
+		$outputlangs = $this->getOutputLangsForObject($sourceObject);
+		$modelPdf = !empty($sourceObject->model_pdf) ? $sourceObject->model_pdf : '';
+		$result = $sourceObject->generateDocument($modelPdf, $outputlangs);
+		$conf->entity = $previousEntity;
+
+		if ($result < 0) {
+			dol_syslog('interentitydocuments: PDF generation failed for source '.$this->getObjectLogLabel($sourceObject).': '.$sourceObject->error, LOG_WARNING);
+			if (empty($sourceFile)) {
+				return -1;
+			}
+		} elseif ($result == 0) {
+			dol_syslog('interentitydocuments: no source PDF model configured for '.$this->getObjectLogLabel($sourceObject), LOG_WARNING);
+			if (empty($sourceFile)) {
+				return 0;
+			}
+		} else {
+			$generatedSourceFile = $this->getMainDocumentFullPath($sourceObject);
+			if (!empty($generatedSourceFile)) {
+				$sourceFile = $generatedSourceFile;
+			}
+		}
+
+		if (empty($sourceFile)) {
+			dol_syslog('interentitydocuments: source PDF not found for '.$this->getObjectLogLabel($sourceObject), LOG_WARNING);
+			return 0;
+		}
+
+		$targetObject->entity = (int) $targetEntity;
+		$targetDir = $this->getObjectDocumentDirectory($targetObject, (int) $targetEntity);
+		if (empty($targetDir)) {
+			dol_syslog('interentitydocuments: target document directory not found for '.$this->getObjectLogLabel($targetObject), LOG_WARNING);
+			return -2;
+		}
+
+		$mkdirResult = dol_mkdir($targetDir);
+		if ($mkdirResult < 0) {
+			dol_syslog('interentitydocuments: unable to create target document directory '.$targetDir, LOG_WARNING);
+			return -3;
+		}
+
+		$destFile = rtrim($targetDir, '/').'/'.$this->getCopiedSourcePdfName($sourceObject, $sourceFile);
+		$copyResult = dol_copy($sourceFile, $destFile, '0', 1, 0, 0);
+		if ($copyResult < 0) {
+			dol_syslog('interentitydocuments: unable to copy source PDF '.$sourceFile.' to '.$destFile, LOG_WARNING);
+			return -4;
+		}
+
+		return $copyResult;
+	}
+
+	/**
+	 * Return the full path of the object's current main PDF, if it exists.
+	 *
+	 * @param CommonObject $object Object to inspect
+	 * @return string Full file path or empty string
+	 */
+	private function getMainDocumentFullPath($object)
+	{
+		if (!is_object($object)) {
+			return '';
+		}
+
+		if (!empty($object->last_main_doc)) {
+			$file = $object->last_main_doc;
+			if (!$this->isAbsolutePath($file) && defined('DOL_DATA_ROOT')) {
+				$file = DOL_DATA_ROOT.'/'.$file;
+			}
+			if ($this->isReadableFile($file)) {
+				return $file;
+			}
+		}
+
+		$dir = $this->getObjectDocumentDirectory($object, !empty($object->entity) ? (int) $object->entity : 0);
+		$ref = $this->getSanitizedObjectRef($object);
+		if (!empty($dir) && !empty($ref)) {
+			$file = rtrim($dir, '/').'/'.$ref.'.pdf';
+			if ($this->isReadableFile($file)) {
+				return $file;
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * Return the native Dolibarr document directory for an object and entity.
+	 *
+	 * @param CommonObject $object Object to inspect
+	 * @param int          $entity Entity owner
+	 * @return string Full directory path or empty string
+	 */
+	private function getObjectDocumentDirectory($object, $entity)
+	{
+		global $conf;
+
+		if (!is_object($object)) {
+			return '';
+		}
+
+		if ($entity <= 0) {
+			$entity = !empty($object->entity) ? (int) $object->entity : (int) $conf->entity;
+		}
+		$object->entity = (int) $entity;
+
+		if (function_exists('getMultidirOutput')) {
+			$module = $this->getMultidirModuleName($object);
+			$dir = getMultidirOutput($object, $module, 1);
+			if (!empty($dir) && strpos($dir, 'error-') !== 0) {
+				return $this->completeDocumentDirectoryWithRef($dir, $object);
+			}
+		}
+
+		$baseDir = $this->getObjectDocumentBaseDirectory($object, (int) $entity);
+		if (empty($baseDir)) {
+			return '';
+		}
+
+		$subdir = '';
+		if (function_exists('get_exdir')) {
+			$subdir = get_exdir(0, 0, 0, 1, $object, !empty($object->element) ? $object->element : '');
+		}
+
+		$dir = rtrim($baseDir, '/');
+		if (!empty($subdir)) {
+			$dir .= '/'.trim($subdir, '/');
+		}
+
+		return $this->completeDocumentDirectoryWithRef($dir, $object);
+	}
+
+	/**
+	 * Return the module name expected by getMultidirOutput.
+	 *
+	 * @param CommonObject $object Object to inspect
+	 * @return string Module name or empty string for autodetection
+	 */
+	private function getMultidirModuleName($object)
+	{
+		$element = !empty($object->element) ? $object->element : '';
+
+		if ($element === 'facture') {
+			return 'invoice';
+		}
+		if ($element === 'invoice_supplier') {
+			return 'supplier_invoice';
+		}
+		if ($element === 'order_supplier') {
+			return 'supplier_order';
+		}
+
+		return '';
+	}
+
+	/**
+	 * Return a fallback base document directory for Dolibarr core objects.
+	 *
+	 * @param CommonObject $object Object to inspect
+	 * @param int          $entity Entity owner
+	 * @return string Full base directory path or empty string
+	 */
+	private function getObjectDocumentBaseDirectory($object, $entity)
+	{
+		global $conf;
+
+		$element = !empty($object->element) ? $object->element : '';
+
+		if ($element === 'commande' || $element === 'order') {
+			if (!empty($conf->commande->multidir_output[$entity])) return $conf->commande->multidir_output[$entity];
+			if (!empty($conf->order->multidir_output[$entity])) return $conf->order->multidir_output[$entity];
+			if (!empty($conf->commande->dir_output)) return $conf->commande->dir_output;
+			if (!empty($conf->order->dir_output)) return $conf->order->dir_output;
+		} elseif ($element === 'facture' || $element === 'invoice') {
+			if (!empty($conf->invoice->multidir_output[$entity])) return $conf->invoice->multidir_output[$entity];
+			if (!empty($conf->facture->multidir_output[$entity])) return $conf->facture->multidir_output[$entity];
+			if (!empty($conf->invoice->dir_output)) return $conf->invoice->dir_output;
+			if (!empty($conf->facture->dir_output)) return $conf->facture->dir_output;
+		} elseif ($element === 'order_supplier') {
+			if (!empty($conf->supplier_order->multidir_output[$entity])) return $conf->supplier_order->multidir_output[$entity];
+			if (!empty($conf->fournisseur->commande->multidir_output[$entity])) return $conf->fournisseur->commande->multidir_output[$entity];
+			if (!empty($conf->fournisseur->commande->dir_output)) return $conf->fournisseur->commande->dir_output;
+			if (!empty($conf->fournisseur->dir_output)) return rtrim($conf->fournisseur->dir_output, '/').'/commande';
+		} elseif ($element === 'invoice_supplier') {
+			if (!empty($conf->supplier_invoice->multidir_output[$entity])) return $conf->supplier_invoice->multidir_output[$entity];
+			if (!empty($conf->fournisseur->facture->multidir_output[$entity])) return $conf->fournisseur->facture->multidir_output[$entity];
+			if (!empty($conf->fournisseur->facture->dir_output)) return $conf->fournisseur->facture->dir_output;
+			if (!empty($conf->fournisseur->dir_output)) return rtrim($conf->fournisseur->dir_output, '/').'/facture';
+		}
+
+		return '';
+	}
+
+	/**
+	 * Ensure the document directory includes the object reference.
+	 *
+	 * @param string       $dir    Directory path
+	 * @param CommonObject $object Object to inspect
+	 * @return string Directory path
+	 */
+	private function completeDocumentDirectoryWithRef($dir, $object)
+	{
+		$ref = $this->getSanitizedObjectRef($object);
+		$dir = rtrim($dir, '/');
+
+		if (!empty($ref) && basename($dir) !== $ref) {
+			$dir .= '/'.$ref;
+		}
+
+		return $dir;
+	}
+
+	/**
+	 * Return the target filename for the copied source PDF.
+	 *
+	 * @param CommonObject $sourceObject Source object
+	 * @param string       $sourceFile   Full source path
+	 * @return string Sanitized filename
+	 */
+	private function getCopiedSourcePdfName($sourceObject, $sourceFile)
+	{
+		$filename = basename($sourceFile);
+		if (empty($filename)) {
+			$filename = $this->getSanitizedObjectRef($sourceObject).'.pdf';
+		}
+
+		return dol_sanitizeFileName($filename);
+	}
+
+	/**
+	 * Return a sanitized object reference usable as a directory or file name.
+	 *
+	 * @param CommonObject $object Object to inspect
+	 * @return string Sanitized reference
+	 */
+	private function getSanitizedObjectRef($object)
+	{
+		if (!is_object($object) || empty($object->ref)) {
+			return '';
+		}
+
+		return dol_sanitizeFileName($object->ref);
+	}
+
+	/**
+	 * Return output language for document generation.
+	 *
+	 * @param CommonObject $object Object to inspect
+	 * @return Translate
+	 */
+	private function getOutputLangsForObject($object)
+	{
+		global $conf, $langs;
+
+		$outputlangs = $langs;
+		$useMultilangs = function_exists('getDolGlobalInt') ? getDolGlobalInt('MAIN_MULTILANGS') : !empty($conf->global->MAIN_MULTILANGS);
+
+		if ($useMultilangs && method_exists($object, 'fetch_thirdparty')) {
+			$object->fetch_thirdparty();
+			if (!empty($object->thirdparty->default_lang)) {
+				$outputlangs = new Translate('', $conf);
+				$outputlangs->setDefaultLang($object->thirdparty->default_lang);
+			}
+		}
+
+		return $outputlangs;
+	}
+
+	/**
+	 * Test if a path is absolute.
+	 *
+	 * @param string $path Path to test
+	 * @return bool
+	 */
+	private function isAbsolutePath($path)
+	{
+		return (bool) preg_match('/^(?:[A-Za-z]:[\/\\\\]|[\/\\\\])/', $path);
+	}
+
+	/**
+	 * Test if a file exists and is readable through Dolibarr helpers when available.
+	 *
+	 * @param string $file Full file path
+	 * @return bool
+	 */
+	private function isReadableFile($file)
+	{
+		if (empty($file)) {
+			return false;
+		}
+		if (function_exists('dol_is_file')) {
+			return dol_is_file($file);
+		}
+
+		return is_file($file);
+	}
+
+	/**
+	 * Return an object label for logs.
+	 *
+	 * @param CommonObject $object Object to inspect
+	 * @return string Object label
+	 */
+	private function getObjectLogLabel($object)
+	{
+		if (!is_object($object)) {
+			return 'unknown';
+		}
+
+		$element = !empty($object->element) ? $object->element : get_class($object);
+		$ref = !empty($object->ref) ? $object->ref : (!empty($object->id) ? '#'.$object->id : '');
+
+		return $element.' '.$ref;
 	}
 }
