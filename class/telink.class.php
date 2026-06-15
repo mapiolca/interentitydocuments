@@ -944,11 +944,25 @@ class TTELink
 
 		if (!empty($object->last_main_doc)) {
 			$file = $object->last_main_doc;
-			if (!$this->isAbsolutePath($file) && defined('DOL_DATA_ROOT')) {
-				$file = DOL_DATA_ROOT.'/'.$file;
-			}
-			if ($this->isReadableFile($file)) {
-				return $file;
+			if ($this->isAbsolutePath($file)) {
+				if ($this->isReadableFile($file)) {
+					return $file;
+				}
+			} elseif (defined('DOL_DATA_ROOT')) {
+				$objectEntity = !empty($object->entity) ? (int) $object->entity : 1;
+				$relativeFile = ltrim($file, '/\\');
+				$filesToCheck = array();
+
+				if ($objectEntity > 1) {
+					$filesToCheck[] = rtrim(DOL_DATA_ROOT, '/').'/'.$objectEntity.'/'.$relativeFile;
+				}
+				$filesToCheck[] = rtrim(DOL_DATA_ROOT, '/').'/'.$relativeFile;
+
+				foreach ($filesToCheck as $fileToCheck) {
+					if ($this->isReadableFile($fileToCheck)) {
+						return $fileToCheck;
+					}
+				}
 			}
 		}
 
