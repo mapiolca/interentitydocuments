@@ -127,10 +127,11 @@ class Interfaceinterentitydocumentstrigger
 
 		if ($action === 'ORDER_SUPPLIER_VALIDATE'){
 			/** @var CommandeFournisseur $object */
-			// si l'option de reception auto des produit sur la commande fournisseur de l'entité client alors il faut vérifier si un entrepot de reception est défini dans le cas au la societé founisseur est une entité Dolibarr
-			// Dans ce il faut bloquer la validation si l'entrepot de reception n'est pas fournis
-			if(!empty($conf->global->OFSOM_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED) && empty($object->array_options['options_reception_warehouse'])) {
-					dol_include_once('/interentitydocuments/class/telink.class.php');
+			// Si l'option de réception auto est active, une commande fournisseur liée
+			// à une entité Dolibarr doit porter son entrepôt de réception.
+			$receptionWarehouseId = $this->getSupplierOrderReceptionWarehouseId($object);
+			if(!empty($conf->global->OFSOM_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED) && $receptionWarehouseId <= 0) {
+				dol_include_once('/interentitydocuments/class/telink.class.php');
 				$telink = new TTELink();
 				$res = $telink->getSocEntityFromSocId($object->socid);
 				if($res > 0){
@@ -668,6 +669,12 @@ class Interfaceinterentitydocumentstrigger
 									continue;
 								}
 
+								$receptionWarehouseId = $this->getSupplierOrderReceptionWarehouseId($supplierOrder);
+								if($receptionWarehouseId <= 0){
+									$this->setError('ReceptionWarehouseNotDefined');
+									return -1;
+								}
+
 //								// Mis en commentaire car au final je le fait ligne à ligne, mais ça peut être intéressant pour plus tard
 //								// si l'expedition est lié à la commande fourn alors on part du principe qu'elle est receptionné car le lien element elements ne se fait que (si rien n'a changé) à la fin de la reception
 //								if(!empty($shipment->linkedObjectsIds['order_supplier']) && in_array($supplierOrder->id, $shipment->linkedObjectsIds['order_supplier'])){
@@ -704,7 +711,7 @@ class Interfaceinterentitydocumentstrigger
 
 										$movementComment = $langs->trans('ReceiveFromAutoWorkflowForSupplierShipment', $shipment->ref);
 
-										$result = $supplierOrder->dispatchProduct($user, $line->fk_product, $line->qty, $supplierOrder->array_options['options_reception_warehouse'], $orderLine->subprice, $movementComment, $dDLC, $dDLUO, $lot, $fk_commandefourndet);
+										$result = $supplierOrder->dispatchProduct($user, $line->fk_product, $line->qty, $receptionWarehouseId, $orderLine->subprice, $movementComment, $dDLC, $dDLUO, $lot, $fk_commandefourndet);
 										if ($result < 0) {
 											$this->setError($supplierOrder->error);
 											return -1;
@@ -715,7 +722,7 @@ class Interfaceinterentitydocumentstrigger
 									$movementComment = $langs->trans('ReceiveFromAutoWorkflowForSupplierShipment', $shipment->ref);
 
 									$dDLC = $dDLUO = $lot = '';
-									$result = $supplierOrder->dispatchProduct($user, $line->fk_product, $line->qty, $supplierOrder->array_options['options_reception_warehouse'], $orderLine->subprice, $movementComment, $dDLC, $dDLUO, $lot, $fk_commandefourndet);
+									$result = $supplierOrder->dispatchProduct($user, $line->fk_product, $line->qty, $receptionWarehouseId, $orderLine->subprice, $movementComment, $dDLC, $dDLUO, $lot, $fk_commandefourndet);
 									if ($result < 0) {
 										$this->setError($supplierOrder->error);
 										return -1;
@@ -857,6 +864,30 @@ class Interfaceinterentitydocumentstrigger
 	 */
 	function clearOrderCache(){
 		$this->orderCache = array();
+	}
+
+	/**
+	 * Charge et retourne l'entrepôt de réception auto d'une commande fournisseur.
+	 *
+	 * @param CommandeFournisseur $supplierOrder
+	 * @return int
+	 */
+	private function getSupplierOrderReceptionWarehouseId($supplierOrder)
+	{
+		if (!is_object($supplierOrder)) {
+			return 0;
+		}
+
+		if (method_exists($supplierOrder, 'fetch_optionals')
+			&& (empty($supplierOrder->array_options) || !is_array($supplierOrder->array_options) || !array_key_exists('options_reception_warehouse', $supplierOrder->array_options))) {
+			$supplierOrder->fetch_optionals();
+		}
+
+		if (empty($supplierOrder->array_options) || !is_array($supplierOrder->array_options)) {
+			return 0;
+		}
+
+		return empty($supplierOrder->array_options['options_reception_warehouse']) ? 0 : (int) $supplierOrder->array_options['options_reception_warehouse'];
 	}
 
 	public function setError($error) {

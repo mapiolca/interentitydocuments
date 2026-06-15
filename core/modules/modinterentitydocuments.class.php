@@ -440,16 +440,17 @@ class modinterentitydocuments extends DolibarrModules
 		// ajout des extrafields
 		$e = new ExtraFields($this->db);
 
-		// Ajout d'un entrepôt de reception dans le cas ou la conf OFSOM_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED est activée
+		// Entrepôt utilisé pour la réception automatique des commandes fournisseur inter-entités.
 		$param = array(
 			'options' => array(
-				'Entrepot:product/stock/class/entrepot.class.php::statut=1' => null,
+				'Entrepot:product/stock/class/entrepot.class.php:0:((statut:=:1) AND (entity:IN:__SHARED_ENTITIES__))' => null,
 			),
 		);
 		$label = 'AutoReceptionWarehouse';
 		$help  = 'AutoReceptionWarehouseHelp';
 		$key   = 'reception_warehouse';
-		$e->addExtraField($key, $label, 'link', 1, 10, 'commande_fournisseur', 0, 0, '', $param, 0, '', 3, $help, '', 0, 'ofsom@interentitydocuments', '!empty($conf->global->OFSOM_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED)');
+		$e->addExtraField($key, $label, 'link', 1, 10, 'commande_fournisseur', 0, 0, '', $param, 1, '', 3, $help, '', 0, 'ofsom@interentitydocuments', 1);
+		$e->updateExtraField($key, $label, 'link', 1, 10, 'commande_fournisseur', 0, 0, '', $param, 1, '', 3, $help, '', 0, 'ofsom@interentitydocuments', 1);
 
 		// Extrafield de liaison entre la ligne de commande fournisseur et la ligne de commande créée
 		$label = 'supplierOrderDetSource';

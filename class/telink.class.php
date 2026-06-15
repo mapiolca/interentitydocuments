@@ -997,8 +997,13 @@ class TTELink
 			$entity = !empty($object->entity) ? (int) $object->entity : (int) $conf->entity;
 		}
 		$ref = $this->getSanitizedObjectRef($object);
-		$folder = $this->getObjectDocumentFolderName($object);
-		if (empty($ref) || empty($folder) || !defined('DOL_DATA_ROOT')) {
+		if (empty($ref) || !defined('DOL_DATA_ROOT')) {
+			return '';
+		}
+
+		$relativeDir = $this->getObjectDocumentRelativeDirectory($object, $ref);
+		if (empty($relativeDir)) {
+			dol_syslog('interentitydocuments: no native document directory mapping for '.$this->getObjectLogLabel($object), LOG_WARNING);
 			return '';
 		}
 
@@ -1007,27 +1012,56 @@ class TTELink
 			$dir .= '/'.((int) $entity);
 		}
 
-		return $dir.'/'.$folder.'/'.$ref;
+		return $dir.'/'.$relativeDir;
 	}
 
 	/**
-	 * Return the Dolibarr folder name used by the recopy workflow.
+	 * Return the native Dolibarr document relative directory for an object.
 	 *
 	 * @param CommonObject $object Object to inspect
-	 * @return string Folder name or empty string
+	 * @param string       $ref    Sanitized object reference
+	 * @return string Relative directory or empty string
 	 */
-	private function getObjectDocumentFolderName($object)
+	private function getObjectDocumentRelativeDirectory($object, $ref)
 	{
 		$element = !empty($object->element) ? $object->element : '';
+		$tableElement = !empty($object->table_element) ? $object->table_element : '';
 
-		if (in_array($element, array('facture', 'invoice', 'invoice_supplier'), true)) {
-			return 'facture';
+		if (in_array($element, array('facture', 'invoice'), true) || $tableElement === 'facture') {
+			return 'facture/'.$ref;
 		}
-		if (in_array($element, array('commande', 'order', 'order_supplier', 'commandefourn'), true)) {
-			return 'commande';
+		if (in_array($element, array('invoice_supplier', 'supplier_invoice', 'facture_fournisseur'), true) || $tableElement === 'facture_fourn') {
+			return 'fournisseur/facture/'.$this->getSupplierInvoiceDocumentSubdir($object, $ref);
+		}
+		if (in_array($element, array('commande', 'order'), true) || $tableElement === 'commande') {
+			return 'commande/'.$ref;
+		}
+		if (in_array($element, array('order_supplier', 'supplier_order', 'commandefourn', 'commande_fournisseur'), true) || $tableElement === 'commande_fournisseur') {
+			return 'fournisseur/commande/'.$ref;
 		}
 
 		return '';
+	}
+
+	/**
+	 * Return the native supplier invoice document subdirectory.
+	 *
+	 * @param CommonObject $object Object to inspect
+	 * @param string       $ref    Sanitized object reference
+	 * @return string Relative supplier invoice subdirectory
+	 */
+	private function getSupplierInvoiceDocumentSubdir($object, $ref)
+	{
+		if (!empty($object->id)) {
+			if (!function_exists('get_exdir') && defined('DOL_DOCUMENT_ROOT')) {
+				require_once DOL_DOCUMENT_ROOT.'/core/lib/files.lib.php';
+			}
+			if (function_exists('get_exdir')) {
+				return get_exdir($object->id, 2, 0, 0, $object, 'invoice_supplier').$ref;
+			}
+		}
+
+		return $ref;
 	}
 
 	/**

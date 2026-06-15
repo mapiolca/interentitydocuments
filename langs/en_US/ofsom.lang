@@ -1,0 +1,6 @@
+# This file exists for extrafields because the langs column is limited to 64 chars.
+
+AutoReceptionWarehouse = Automatic reception warehouse
+AutoReceptionWarehouseHelp = For automatic inter-entity reception, define the reception warehouse on the supplier order.
+supplierOrderDetSource = Link between inter-entity order lines
+supplierOrderDetSourceHelp = Link between supplier order lines and customer order lines between entities

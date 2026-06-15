@@ -12,6 +12,8 @@
 - Correction de l'onglet À propos sans dépendance à une fonction `Markdown()`.
 - Remplacement d'un accès direct à `$_REQUEST` par `GETPOST()` dans la page de réglages.
 - Conservation de l'entité courante lors d'un échec de suppression d'une commande client cible existante.
+- Correction de l'extrafield d'entrepôt de réception automatique des commandes fournisseur.
+- Alignement de la recopie PDF sur les dossiers documentaires natifs des objets de destination.
 
 ## 1.0 29/04/2026
 
