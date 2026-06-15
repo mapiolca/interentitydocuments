@@ -4,6 +4,7 @@ interentitydocumentsSetupPage=Ajoutez ici la correspondance entre un tiers et un
 interentitydocumentsSetup=Créé des des documents depuis d'autres entités multicompany
 interentitydocumentsAbout=À propos
 interentitydocumentsAboutPage=Informations sur le module Documents inter-entités.
+interentitydocumentsReadmeMissing=Le fichier README.md du module est introuvable ou illisible.
 
 # CONF
 

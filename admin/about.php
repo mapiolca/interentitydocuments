@@ -73,8 +73,15 @@ echo $langs->trans("interentitydocumentsAboutPage");
 
 echo '<br>';
 
-$buffer = file_get_contents(dol_buildpath('/interentitydocuments/README.md', 0));
-echo Markdown($buffer);
+$readmefile = dol_buildpath('/interentitydocuments/README.md', 0);
+if (is_readable($readmefile)) {
+	$buffer = file_get_contents($readmefile);
+	echo '<div class="fichecenter"><pre class="opacitymedium" style="white-space: pre-wrap;">';
+	echo htmlspecialchars($buffer, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+	echo '</pre></div>';
+} else {
+	echo '<span class="opacitymedium">'.$langs->trans('interentitydocumentsReadmeMissing').'</span>';
+}
 
 echo '<br>',
 '<a href="' . dol_buildpath('/interentitydocuments/COPYING', 1) . '">',

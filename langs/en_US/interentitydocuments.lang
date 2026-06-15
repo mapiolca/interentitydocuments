@@ -3,6 +3,7 @@ Module450020Desc = Created sales orders from purchase orders to other entities
 interentitydocumentsSetupPage = Here the connection between one third and one entity.
 interentitydocumentsAbout = About
 interentitydocumentsAboutPage = Information about the Inter-entity documents module.
+interentitydocumentsReadmeMissing = The module README.md file is missing or unreadable.
 
 # CONF
 
