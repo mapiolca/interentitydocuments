@@ -25,9 +25,9 @@
 
 function interentitydocumentsAdminPrepareHead()
 {
-    global $langs, $conf;
+	global $langs, $conf;
 
-    $langs->load("interentitydocuments@interentitydocuments");
+	$langs->load("interentitydocuments@interentitydocuments");
 
     $h = 0;
     $head = array();
@@ -46,10 +46,11 @@ function interentitydocumentsAdminPrepareHead()
     //$this->tabs = array(
     //	'entity:+tabname:Title:@interentitydocuments:/interentitydocuments/mypage.php?id=__ID__'
     //); // to add new tab
-    //$this->tabs = array(
-    //	'entity:-tabname:Title:@interentitydocuments:/interentitydocuments/mypage.php?id=__ID__'
-    //); // to remove a tab
-    complete_head_from_modules($conf, $langs, $object, $head, $h, 'interentitydocuments');
+	//$this->tabs = array(
+	//	'entity:-tabname:Title:@interentitydocuments:/interentitydocuments/mypage.php?id=__ID__'
+	//); // to remove a tab
+	$object = null;
+	complete_head_from_modules($conf, $langs, $object, $head, $h, 'interentitydocuments');
 
-    return $head;
+	return $head;
 }
