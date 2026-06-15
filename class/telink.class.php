@@ -843,7 +843,7 @@ class TTELink
 	}
 
 	/**
-	 * Generate the source object's PDF and copy it into the linked target object's document directory.
+	 * Find or generate the source object's PDF and copy it into the linked target object's document directory.
 	 *
 	 * The copy is deliberately non-blocking for the business clone because the clone flow is not transactional.
 	 * Errors are logged and the linked object remains available even when no PDF model is configured.
@@ -867,26 +867,38 @@ class TTELink
 		$previousEntity = (int) $conf->entity;
 		$sourceFile = $this->getMainDocumentFullPath($sourceObject);
 
-		$conf->entity = $sourceEntity;
-		$outputlangs = $this->getOutputLangsForObject($sourceObject);
-		$modelPdf = !empty($sourceObject->model_pdf) ? $sourceObject->model_pdf : '';
-		$result = $sourceObject->generateDocument($modelPdf, $outputlangs);
-		$conf->entity = $previousEntity;
+		if (empty($sourceFile)) {
+			$result = 0;
+			$generationError = '';
 
-		if ($result < 0) {
-			dol_syslog('interentitydocuments: PDF generation failed for source '.$this->getObjectLogLabel($sourceObject).': '.$sourceObject->error, LOG_WARNING);
-			if (empty($sourceFile)) {
-				return -1;
+			$conf->entity = $sourceEntity;
+			try {
+				$outputlangs = $this->getOutputLangsForObject($sourceObject);
+				$modelPdf = !empty($sourceObject->model_pdf) ? $sourceObject->model_pdf : '';
+				$result = $sourceObject->generateDocument($modelPdf, $outputlangs);
+			} catch (Throwable $e) {
+				$result = -1;
+				$generationError = $e->getMessage();
+			} finally {
+				$conf->entity = $previousEntity;
 			}
-		} elseif ($result == 0) {
-			dol_syslog('interentitydocuments: no source PDF model configured for '.$this->getObjectLogLabel($sourceObject), LOG_WARNING);
-			if (empty($sourceFile)) {
-				return 0;
-			}
-		} else {
+
 			$generatedSourceFile = $this->getMainDocumentFullPath($sourceObject);
 			if (!empty($generatedSourceFile)) {
 				$sourceFile = $generatedSourceFile;
+			}
+
+			if ($result < 0) {
+				$errorMessage = !empty($generationError) ? $generationError : (!empty($sourceObject->error) ? $sourceObject->error : 'unknown error');
+				dol_syslog('interentitydocuments: PDF generation failed for source '.$this->getObjectLogLabel($sourceObject).': '.$errorMessage, LOG_WARNING);
+				if (empty($sourceFile)) {
+					return -1;
+				}
+			} elseif ($result == 0) {
+				dol_syslog('interentitydocuments: no source PDF model configured for '.$this->getObjectLogLabel($sourceObject), LOG_WARNING);
+				if (empty($sourceFile)) {
+					return 0;
+				}
 			}
 		}
 
