@@ -37,6 +37,17 @@ class Interfaceinterentitydocumentstrigger
 {
 
 	private $db;
+	public $name;
+	public $family;
+	public $description;
+	public $version;
+	public $picto;
+	public $error = '';
+	public $errors = array();
+
+	private $OrderLineCache = array();
+	private $CommandeCache = array();
+	private $CommandeFournisseurCache = array();
 
 	/**
 	 * Constructor
@@ -841,7 +852,7 @@ class Interfaceinterentitydocumentstrigger
 	 * clear Order Lines Cache
 	 */
 	function clearOrderLineCache(){
-		$this->orderLineCache = array();
+		$this->OrderLineCache = array();
 	}
 
 	/**
@@ -863,7 +874,8 @@ class Interfaceinterentitydocumentstrigger
 	 * clear Order Cache
 	 */
 	function clearOrderCache(){
-		$this->orderCache = array();
+		$this->CommandeCache = array();
+		$this->CommandeFournisseurCache = array();
 	}
 
 	/**

@@ -14,6 +14,7 @@
 - Conservation de l'entité courante lors d'un échec de suppression d'une commande client cible existante.
 - Correction de l'extrafield d'entrepôt de réception automatique des commandes fournisseur.
 - Alignement de la recopie PDF sur les dossiers documentaires natifs des objets de destination.
+- Déclaration explicite des propriétés du trigger pour éviter les warnings PHP 8.2.
 
 ## 1.0 29/04/2026
 
