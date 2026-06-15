@@ -15,6 +15,7 @@
 - Correction de l'extrafield d'entrepôt de réception automatique des commandes fournisseur.
 - Alignement de la recopie PDF sur les dossiers documentaires natifs des objets de destination.
 - Déclaration explicite des propriétés du trigger pour éviter les warnings PHP 8.2.
+- Synchronisation des copies PDF après validation, paiement et régénération manuelle avec la référence courante.
 
 ## 1.0 29/04/2026
 

@@ -352,7 +352,7 @@ class TTELink
 		}
 
 		$fi->entity = (int) $toEntity;
-		$this->copySourcePdfToTargetDocuments($facture, $fi, (int) $toEntity);
+		$this->copySourcePdfToTargetDocuments($facture, $fi, (int) $toEntity, true);
 
 		return $invoiceCreatedRes;
 	}
@@ -540,7 +540,7 @@ class TTELink
 				}
 
 				$o->entity = (int) $toEntity;
-				$this->copySourcePdfToTargetDocuments($cf, $o, (int) $toEntity);
+				$this->copySourcePdfToTargetDocuments($cf, $o, (int) $toEntity, true);
 			}
 
 			if (!empty($conf->global->OFSOM_DONT_FORCE_BUY_PRICE_WITH_SELL_PRICE)) $conf->global->ForceBuyingPriceIfNull = $oldval;
@@ -703,7 +703,7 @@ class TTELink
 		}
 
 		$supplierOrder->entity = (int) $toEntity;
-		$this->copySourcePdfToTargetDocuments($order, $supplierOrder, (int) $toEntity);
+		$this->copySourcePdfToTargetDocuments($order, $supplierOrder, (int) $toEntity, true);
 
 		return $orderCreatedRes;
 	}
@@ -843,6 +843,66 @@ class TTELink
 	}
 
 	/**
+	 * Synchronize the current source PDF to all linked target document folders.
+	 *
+	 * @param CommonObject $sourceObject Source object
+	 * @param bool         $forceGenerateSourcePdf Force source PDF generation before copy
+	 * @param string       $preferredSourceFile Already generated source file to copy first
+	 * @return int Number of successful copies
+	 */
+	public function syncLinkedTargetPdfs($sourceObject, $forceGenerateSourcePdf = false, $preferredSourceFile = '')
+	{
+		global $db;
+
+		if (!is_object($sourceObject) || empty($sourceObject->id)) {
+			return 0;
+		}
+
+		$sourceTypeAliases = $this->getDocumentElementAliasesFromObject($sourceObject);
+		if (empty($sourceTypeAliases)) {
+			return 0;
+		}
+
+		$sourceObjectFresh = $this->fetchDocumentObject($sourceTypeAliases[0], (int) $sourceObject->id);
+		if (is_object($sourceObjectFresh)) {
+			$sourceObject = $sourceObjectFresh;
+		}
+
+		$escapedSourceTypes = array();
+		foreach ($sourceTypeAliases as $sourceTypeAlias) {
+			$escapedSourceTypes[] = "'".$db->escape($sourceTypeAlias)."'";
+		}
+
+		$sql = "SELECT fk_target, targettype FROM ".MAIN_DB_PREFIX."element_element";
+		$sql .= " WHERE fk_source = ".((int) $sourceObject->id);
+		$sql .= " AND sourcetype IN (".implode(',', $escapedSourceTypes).")";
+
+		$resql = $db->query($sql);
+		if (!$resql) {
+			$this->error = $db->lasterror();
+			dol_syslog('interentitydocuments: unable to fetch linked objects for PDF synchronization: '.$this->error, LOG_WARNING);
+			return 0;
+		}
+
+		$copyCount = 0;
+		while ($obj = $db->fetch_object($resql)) {
+			$targetObject = $this->fetchDocumentObject($obj->targettype, (int) $obj->fk_target);
+			if (!is_object($targetObject)) {
+				dol_syslog('interentitydocuments: unable to fetch linked target '.$obj->targettype.'#'.((int) $obj->fk_target).' for PDF synchronization', LOG_WARNING);
+				continue;
+			}
+
+			$targetEntity = !empty($targetObject->entity) ? (int) $targetObject->entity : 1;
+			$result = $this->copySourcePdfToTargetDocuments($sourceObject, $targetObject, $targetEntity, $forceGenerateSourcePdf, $preferredSourceFile);
+			if ($result > 0) {
+				$copyCount++;
+			}
+		}
+
+		return $copyCount;
+	}
+
+	/**
 	 * Find or generate the source object's PDF and copy it into the linked target object's document directory.
 	 *
 	 * The copy is deliberately non-blocking for the business clone because the clone flow is not transactional.
@@ -851,9 +911,11 @@ class TTELink
 	 * @param CommonObject $sourceObject Source object used to generate the PDF
 	 * @param CommonObject $targetObject Target linked object that receives the PDF copy
 	 * @param int          $targetEntity Entity that owns the target object
+	 * @param bool         $forceGenerateSourcePdf Force source PDF generation before copy
+	 * @param string       $preferredSourceFile Already generated source file to copy first
 	 * @return int <0 if copy failed, 0 if no PDF was generated/found, >0 if copied
 	 */
-	private function copySourcePdfToTargetDocuments($sourceObject, $targetObject, $targetEntity)
+	private function copySourcePdfToTargetDocuments($sourceObject, $targetObject, $targetEntity, $forceGenerateSourcePdf = false, $preferredSourceFile = '')
 	{
 		global $conf;
 
@@ -865,13 +927,21 @@ class TTELink
 
 		$sourceEntity = !empty($sourceObject->entity) ? (int) $sourceObject->entity : (int) $conf->entity;
 		$previousEntity = (int) $conf->entity;
-		$sourceFile = $this->getMainDocumentFullPath($sourceObject);
+		$sourceFile = '';
+		if (!$forceGenerateSourcePdf && !empty($preferredSourceFile) && $this->isReadableFile($preferredSourceFile) && $this->isMainDocumentForCurrentRef($preferredSourceFile, $sourceObject)) {
+			$sourceFile = $preferredSourceFile;
+		}
+		if (!$forceGenerateSourcePdf && empty($sourceFile)) {
+			$sourceFile = $this->getMainDocumentFullPath($sourceObject);
+		}
 
-		if (empty($sourceFile)) {
+		if ($forceGenerateSourcePdf || empty($sourceFile)) {
 			$result = 0;
 			$generationError = '';
+			$previousGenerationFlag = !empty($GLOBALS['INTERENTITYDOCUMENTS_SYNC_GENERATING_SOURCE_PDF']);
 
 			$conf->entity = $sourceEntity;
+			$GLOBALS['INTERENTITYDOCUMENTS_SYNC_GENERATING_SOURCE_PDF'] = true;
 			try {
 				$outputlangs = $this->getOutputLangsForObject($sourceObject);
 				$modelPdf = !empty($sourceObject->model_pdf) ? $sourceObject->model_pdf : '';
@@ -881,6 +951,11 @@ class TTELink
 				$generationError = $e->getMessage();
 			} finally {
 				$conf->entity = $previousEntity;
+				if ($previousGenerationFlag) {
+					$GLOBALS['INTERENTITYDOCUMENTS_SYNC_GENERATING_SOURCE_PDF'] = true;
+				} else {
+					unset($GLOBALS['INTERENTITYDOCUMENTS_SYNC_GENERATING_SOURCE_PDF']);
+				}
 			}
 
 			$generatedSourceFile = $this->getMainDocumentFullPath($sourceObject);
@@ -942,8 +1017,22 @@ class TTELink
 			return '';
 		}
 
+		$dir = $this->getObjectDocumentDirectory($object, !empty($object->entity) ? (int) $object->entity : 0);
+		$ref = $this->getSanitizedObjectRef($object);
+		if (!empty($dir) && !empty($ref)) {
+			$file = rtrim($dir, '/').'/'.$ref.'.pdf';
+			if ($this->isReadableFile($file)) {
+				return $file;
+			}
+		}
+
 		if (!empty($object->last_main_doc)) {
 			$file = $object->last_main_doc;
+			if (!$this->isMainDocumentForCurrentRef($file, $object)) {
+				dol_syslog('interentitydocuments: ignoring stale main PDF '.$file.' for '.$this->getObjectLogLabel($object), LOG_DEBUG);
+				return '';
+			}
+
 			if ($this->isAbsolutePath($file)) {
 				if ($this->isReadableFile($file)) {
 					return $file;
@@ -966,16 +1055,27 @@ class TTELink
 			}
 		}
 
-		$dir = $this->getObjectDocumentDirectory($object, !empty($object->entity) ? (int) $object->entity : 0);
+		return '';
+	}
+
+	/**
+	 * Test if a PDF path matches the current object reference.
+	 *
+	 * @param string       $file   File path or relative path
+	 * @param CommonObject $object Object to inspect
+	 * @return bool True if the file name uses the current object reference
+	 */
+	private function isMainDocumentForCurrentRef($file, $object)
+	{
 		$ref = $this->getSanitizedObjectRef($object);
-		if (!empty($dir) && !empty($ref)) {
-			$file = rtrim($dir, '/').'/'.$ref.'.pdf';
-			if ($this->isReadableFile($file)) {
-				return $file;
-			}
+		if (empty($file) || empty($ref)) {
+			return false;
 		}
 
-		return '';
+		$normalizedFile = str_replace('\\', '/', $file);
+		$filenameWithoutExtension = pathinfo(basename($normalizedFile), PATHINFO_FILENAME);
+
+		return dol_sanitizeFileName($filenameWithoutExtension) === $ref;
 	}
 
 	/**
@@ -1094,6 +1194,97 @@ class TTELink
 		}
 
 		return dol_sanitizeFileName($object->ref);
+	}
+
+	/**
+	 * Return all element aliases used by Dolibarr and by legacy links for an object.
+	 *
+	 * @param CommonObject $object Object to inspect
+	 * @return string[] Element aliases
+	 */
+	private function getDocumentElementAliasesFromObject($object)
+	{
+		if (!is_object($object)) {
+			return array();
+		}
+
+		$aliases = array();
+		if (!empty($object->element)) {
+			$aliases = array_merge($aliases, $this->getDocumentElementAliases($object->element));
+		}
+		if (!empty($object->table_element)) {
+			$aliases = array_merge($aliases, $this->getDocumentElementAliases($object->table_element));
+		}
+
+		return array_values(array_unique(array_filter($aliases)));
+	}
+
+	/**
+	 * Return all aliases for a supported document element.
+	 *
+	 * @param string $element Element or table element
+	 * @return string[] Element aliases
+	 */
+	private function getDocumentElementAliases($element)
+	{
+		if (in_array($element, array('facture', 'invoice'), true)) {
+			return array('facture', 'invoice');
+		}
+		if (in_array($element, array('invoice_supplier', 'supplier_invoice', 'facture_fournisseur', 'facture_fourn'), true)) {
+			return array('invoice_supplier', 'supplier_invoice', 'facture_fournisseur', 'facture_fourn');
+		}
+		if (in_array($element, array('commande', 'order'), true)) {
+			return array('commande', 'order');
+		}
+		if (in_array($element, array('order_supplier', 'supplier_order', 'commandefourn', 'commande_fournisseur'), true)) {
+			return array('order_supplier', 'supplier_order', 'commandefourn', 'commande_fournisseur');
+		}
+
+		return array();
+	}
+
+	/**
+	 * Fetch a supported Dolibarr document object.
+	 *
+	 * @param string $element Element or table element
+	 * @param int    $id      Object id
+	 * @return CommonObject|false Loaded object or false
+	 */
+	private function fetchDocumentObject($element, $id)
+	{
+		global $db;
+
+		$id = (int) $id;
+		if ($id <= 0) {
+			return false;
+		}
+
+		if (in_array($element, array('facture', 'invoice'), true)) {
+			dol_include_once('/compta/facture/class/facture.class.php');
+			$object = new Facture($db);
+		} elseif (in_array($element, array('invoice_supplier', 'supplier_invoice', 'facture_fournisseur', 'facture_fourn'), true)) {
+			dol_include_once('/fourn/class/fournisseur.facture.class.php');
+			$object = new FactureFournisseur($db);
+		} elseif (in_array($element, array('commande', 'order'), true)) {
+			dol_include_once('/commande/class/commande.class.php');
+			$object = new Commande($db);
+		} elseif (in_array($element, array('order_supplier', 'supplier_order', 'commandefourn', 'commande_fournisseur'), true)) {
+			dol_include_once('/fourn/class/fournisseur.commande.class.php');
+			$object = new CommandeFournisseur($db);
+		} else {
+			return false;
+		}
+
+		$result = $object->fetch($id);
+		if ($result <= 0) {
+			return false;
+		}
+
+		if (method_exists($object, 'fetch_lines')) {
+			$object->fetch_lines();
+		}
+
+		return $object;
 	}
 
 	/**

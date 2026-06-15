@@ -177,6 +177,18 @@ class Interfaceinterentitydocumentstrigger
 			// Création automatique de la commande fournisseur dans l'entité de destination.
 			return $this->_cloneSupplierOrderFromCustomerOrder($object);
 		}
+		elseif (in_array($action, array('BILL_PAYED', 'BILL_UNPAYED', 'BILL_CANCEL', 'BILL_SUPPLIER_PAYED', 'BILL_SUPPLIER_UNPAYED', 'BILL_SUPPLIER_CANCEL'), true)) {
+			$this->syncLinkedTargetPdfs($object, true);
+			return 0;
+		}
+		elseif ($action === 'PAYMENT_CUSTOMER_CREATE') {
+			$this->syncCustomerPaymentInvoicePdfs($object);
+			return 0;
+		}
+		elseif ($action === 'PAYMENT_SUPPLIER_CREATE') {
+			$this->syncSupplierPaymentInvoicePdfs($object);
+			return 0;
+		}
 		elseif ($action === 'ORDER_SUPPLIER_RECEIVE') {
 
 			require_once DOL_DOCUMENT_ROOT . '/commande/class/commande.class.php';
@@ -502,6 +514,111 @@ class Interfaceinterentitydocumentstrigger
 			}
 		}
 		return 0;
+	}
+
+	/**
+	 * Synchronize source PDF copies to linked target document folders.
+	 *
+	 * @param CommonObject $object Source object
+	 * @param bool         $forceGenerateSourcePdf Force source PDF generation before copy
+	 * @return int Number of copied files
+	 */
+	private function syncLinkedTargetPdfs($object, $forceGenerateSourcePdf = false)
+	{
+		dol_include_once('/interentitydocuments/class/telink.class.php');
+
+		$telink = new TTELink();
+		$result = $telink->syncLinkedTargetPdfs($object, $forceGenerateSourcePdf);
+		if ($result < 0) {
+			dol_syslog('interentitydocuments: linked PDF synchronization failed for trigger object', LOG_WARNING);
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Synchronize linked customer invoice PDFs after a payment is recorded.
+	 *
+	 * @param Paiement $payment Customer payment
+	 * @return int Number of synchronized invoices
+	 */
+	private function syncCustomerPaymentInvoicePdfs($payment)
+	{
+		dol_include_once('/compta/facture/class/facture.class.php');
+
+		$amounts = $this->getPaymentAmounts($payment);
+		$count = 0;
+		foreach ($amounts as $invoiceId => $amount) {
+			if ((float) $amount == 0) {
+				continue;
+			}
+
+			$invoice = new Facture($this->db);
+			if ($invoice->fetch((int) $invoiceId) <= 0) {
+				continue;
+			}
+			if (method_exists($invoice, 'fetch_lines')) {
+				$invoice->fetch_lines();
+			}
+
+			$this->syncLinkedTargetPdfs($invoice, true);
+			$count++;
+		}
+
+		return $count;
+	}
+
+	/**
+	 * Synchronize linked supplier invoice PDFs after a supplier payment is recorded.
+	 *
+	 * @param PaiementFourn $payment Supplier payment
+	 * @return int Number of synchronized invoices
+	 */
+	private function syncSupplierPaymentInvoicePdfs($payment)
+	{
+		dol_include_once('/fourn/class/fournisseur.facture.class.php');
+
+		$amounts = $this->getPaymentAmounts($payment);
+		$count = 0;
+		foreach ($amounts as $invoiceId => $amount) {
+			if ((float) $amount == 0) {
+				continue;
+			}
+
+			$invoice = new FactureFournisseur($this->db);
+			if ($invoice->fetch((int) $invoiceId) <= 0) {
+				continue;
+			}
+			if (method_exists($invoice, 'fetch_lines')) {
+				$invoice->fetch_lines();
+			}
+
+			$this->syncLinkedTargetPdfs($invoice, true);
+			$count++;
+		}
+
+		return $count;
+	}
+
+	/**
+	 * Return payment amounts indexed by invoice id.
+	 *
+	 * @param CommonObject $payment Payment object
+	 * @return array
+	 */
+	private function getPaymentAmounts($payment)
+	{
+		if (!empty($payment->amounts) && is_array($payment->amounts)) {
+			return $payment->amounts;
+		}
+		if (method_exists($payment, 'getAmounts')) {
+			$amounts = $payment->getAmounts();
+			if (is_array($amounts)) {
+				return $amounts;
+			}
+		}
+
+		return array();
 	}
 
 	/**
