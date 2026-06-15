@@ -16,6 +16,7 @@
 - Alignement de la recopie PDF sur les dossiers documentaires natifs des objets de destination.
 - Déclaration explicite des propriétés du trigger pour éviter les warnings PHP 8.2.
 - Synchronisation des copies PDF après validation, paiement et régénération manuelle avec la référence courante.
+- Correction de la génération forcée du PDF source : un PDF existant est toujours recopié sans réindexation ECM.
 
 ## 1.0 29/04/2026
 

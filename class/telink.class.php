@@ -846,7 +846,7 @@ class TTELink
 	 * Synchronize the current source PDF to all linked target document folders.
 	 *
 	 * @param CommonObject $sourceObject Source object
-	 * @param bool         $forceGenerateSourcePdf Force source PDF generation before copy
+	 * @param bool         $forceGenerateSourcePdf Legacy flag; generation is only attempted when no readable source PDF exists
 	 * @param string       $preferredSourceFile Already generated source file to copy first
 	 * @return int Number of successful copies
 	 */
@@ -911,7 +911,7 @@ class TTELink
 	 * @param CommonObject $sourceObject Source object used to generate the PDF
 	 * @param CommonObject $targetObject Target linked object that receives the PDF copy
 	 * @param int          $targetEntity Entity that owns the target object
-	 * @param bool         $forceGenerateSourcePdf Force source PDF generation before copy
+	 * @param bool         $forceGenerateSourcePdf Legacy flag; generation is only attempted when no readable source PDF exists
 	 * @param string       $preferredSourceFile Already generated source file to copy first
 	 * @return int <0 if copy failed, 0 if no PDF was generated/found, >0 if copied
 	 */
@@ -928,14 +928,19 @@ class TTELink
 		$sourceEntity = !empty($sourceObject->entity) ? (int) $sourceObject->entity : (int) $conf->entity;
 		$previousEntity = (int) $conf->entity;
 		$sourceFile = '';
-		if (!$forceGenerateSourcePdf && !empty($preferredSourceFile) && $this->isReadableFile($preferredSourceFile) && $this->isMainDocumentForCurrentRef($preferredSourceFile, $sourceObject)) {
+		if (!empty($preferredSourceFile) && $this->isReadableFile($preferredSourceFile) && $this->isMainDocumentForCurrentRef($preferredSourceFile, $sourceObject)) {
 			$sourceFile = $preferredSourceFile;
 		}
-		if (!$forceGenerateSourcePdf && empty($sourceFile)) {
+		if (empty($sourceFile)) {
 			$sourceFile = $this->getMainDocumentFullPath($sourceObject);
 		}
 
-		if ($forceGenerateSourcePdf || empty($sourceFile)) {
+		if (empty($sourceFile) && $this->hasExistingEcmMainDocumentEntry($sourceObject)) {
+			dol_syslog('interentitydocuments: source PDF ECM record already exists but file is not readable for '.$this->getObjectLogLabel($sourceObject).'; skipping generation to avoid ECM duplicate', LOG_WARNING);
+			return 0;
+		}
+
+		if (empty($sourceFile)) {
 			$result = 0;
 			$generationError = '';
 			$previousGenerationFlag = !empty($GLOBALS['INTERENTITYDOCUMENTS_SYNC_GENERATING_SOURCE_PDF']);
@@ -1056,6 +1061,56 @@ class TTELink
 		}
 
 		return '';
+	}
+
+	/**
+	 * Check if the expected main PDF is already indexed in ECM.
+	 *
+	 * This prevents duplicate uk_ecm_files errors when the source file cannot be read but Dolibarr already indexed it.
+	 *
+	 * @param CommonObject $object Object to inspect
+	 * @return bool True when an ECM row already exists for the expected main PDF
+	 */
+	private function hasExistingEcmMainDocumentEntry($object)
+	{
+		global $db, $conf;
+
+		if (!is_object($object)) {
+			return false;
+		}
+
+		$ref = $this->getSanitizedObjectRef($object);
+		if (empty($ref)) {
+			return false;
+		}
+
+		$relativeDir = $this->getObjectDocumentRelativeDirectory($object, $ref);
+		if (empty($relativeDir)) {
+			return false;
+		}
+
+		$entity = !empty($object->entity) ? (int) $object->entity : (int) $conf->entity;
+		if ($entity <= 0) {
+			$entity = 1;
+		}
+
+		$sql = "SELECT rowid";
+		$sql .= " FROM ".MAIN_DB_PREFIX."ecm_files";
+		$sql .= " WHERE entity = ".$entity;
+		$sql .= " AND filepath = '".$db->escape($relativeDir)."'";
+		$sql .= " AND filename = '".$db->escape($ref.'.pdf')."'";
+		$sql .= " LIMIT 1";
+
+		$resql = $db->query($sql);
+		if (!$resql) {
+			dol_syslog('interentitydocuments: unable to check ECM source PDF entry for '.$this->getObjectLogLabel($object).': '.$db->lasterror(), LOG_WARNING);
+			return false;
+		}
+
+		$exists = ($db->num_rows($resql) > 0);
+		$db->free($resql);
+
+		return $exists;
 	}
 
 	/**

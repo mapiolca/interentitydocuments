@@ -520,7 +520,7 @@ class Interfaceinterentitydocumentstrigger
 	 * Synchronize source PDF copies to linked target document folders.
 	 *
 	 * @param CommonObject $object Source object
-	 * @param bool         $forceGenerateSourcePdf Force source PDF generation before copy
+	 * @param bool         $forceGenerateSourcePdf Legacy flag; generation is only attempted when no readable source PDF exists
 	 * @return int Number of copied files
 	 */
 	private function syncLinkedTargetPdfs($object, $forceGenerateSourcePdf = false)
