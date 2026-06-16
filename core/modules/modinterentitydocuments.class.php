@@ -1,6 +1,7 @@
 <?php
-/* <one line to give the program's name and a brief idea of what it does.>
+/* Documents inter-entités module for Dolibarr.
  * Copyright (C) 2013 ATM Consulting <support@atm-consulting.fr>
+ * Copyright (C) 2026 Pierre Ardoin <developpeur@lesmetiersdubatiment.fr>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -43,37 +44,24 @@ class modinterentitydocuments extends DolibarrModules
         $this->db = $db;
 
         // Id for module (must be unique).
-        // Use a free id here
-        // (See in Home -> System information -> Dolibarr for list of used modules id).
-        $this->numero = 450020; // 104000 to 104999 for ATM CONSULTING
+        $this->numero = 450020;
         // Key text used to identify module (for permissions, menus, etc...)
         $this->rights_class = 'interentitydocuments';
 
         // Family can be 'crm','financial','hr','projects','products','ecm','technic','other'
         // It is used to group modules in module setup page
         $this->family = "Les Métiers du Bâtiment";
-        // Module label (no space allowed)
-        // used if translation strinpplierordermulticompany 	Description of module interentitydocumentsg 'ModuleXXXName' not found
-        // (where XXX is value of numeric property 'numero' of module)
         $this->name = preg_replace('/^mod/i', '', get_class($this));
-        // Module description
-        // used if translation string 'ModuleXXXDesc' not found
-        // (where XXX is value of numeric property 'numero' of module)
-        $this->description = "Description of module interentitydocuments";
+        $this->description = "Create linked documents between Multicompany entities";
         // Possible values for version are: 'development', 'experimental' or version
         $this->version = '1.0.0';
-        // Key used in llx_const table to save module status enabled/disabled
+        // Key used in the Dolibarr constants table to save module status enabled/disabled
         // (where MYMODULE is value of property name of module in uppercase)
         $this->const_name = 'MAIN_MODULE_' . strtoupper($this->name);
         // Where to store the module in setup page
         // (0=common,1=interface,2=others,3=very specific)
         $this->special = 2;
-        // Name of image file used for this module.
-        // If file is in theme/yourtheme/img directory under name object_pictovalue.png
-        // use this->picto='pictovalue'
-        // If file is in module/img directory under name object_pictovalue.png
-        // use this->picto='pictovalue@module'
-        $this->picto = 'link'; // mypicto@interentitydocuments
+        $this->picto = 'interentitydocuments@interentitydocuments';
         // Defined all module parts (triggers, login, substitutions, menus, css, etc...)
         // for default path (eg: /interentitydocuments/core/xxxxx) (0=disable, 1=enable)
         // for specific path of parts (eg: /interentitydocuments/core/modules/barcode)
@@ -105,7 +93,7 @@ class modinterentitydocuments extends DolibarrModules
 
         // Config pages. Put here list of php pages
         // stored into interentitydocuments/admin directory, used to setup module.
-        $this->config_page_url = array("interentitydocuments_setup.php@interentitydocuments");
+        $this->config_page_url = array("setup.php@interentitydocuments");
 
         // Dependencies
         // List of modules id that must be enabled if this module is enabled
@@ -113,10 +101,10 @@ class modinterentitydocuments extends DolibarrModules
         // List of modules id to disable if this one is disabled
         $this->requiredby = array();
         // Minimum version of PHP required by module
-        $this->phpmin = array(5, 3);
+        $this->phpmin = array(8, 0);
         // Minimum version of Dolibarr required by module
-        $this->need_dolibarr_version = array(3, 2);
-        $this->langfiles = array("interentitydocuments@interentitydocuments"); // langfiles@interentitydocuments
+        $this->need_dolibarr_version = array(20, 0);
+        $this->langfiles = array("interentitydocuments@interentitydocuments", "ied@interentitydocuments");
         // Constants
         // List of particular constants to add when module is enabled
         // (key, 'chaine', value, desc, visible, 'current' or 'allentities', deleteonunactive)
@@ -213,17 +201,7 @@ class modinterentitydocuments extends DolibarrModules
          */
 
         // Boxes
-        // Add here list of php file(s) stored in core/boxes that contains class to show a box.
         $this->boxes = array(); // Boxes list
-        $r = 0;
-        // Example:
-
-        $this->boxes[$r][1] = "interentitydocuments_box@interentitydocuments";
-        $r ++;
-        /*
-          $this->boxes[$r][1] = "myboxb.php";
-          $r++;
-         */
 
         // Permissions
         $this->rights = array(); // Permission array used by this module
@@ -437,6 +415,8 @@ class modinterentitydocuments extends DolibarrModules
 
         $result = $this->loadTables();
 
+		require_once DOL_DOCUMENT_ROOT.'/core/class/extrafields.class.php';
+
 		// ajout des extrafields
 		$e = new ExtraFields($this->db);
 
@@ -449,14 +429,14 @@ class modinterentitydocuments extends DolibarrModules
 		$label = 'AutoReceptionWarehouse';
 		$help  = 'AutoReceptionWarehouseHelp';
 		$key   = 'reception_warehouse';
-		$e->addExtraField($key, $label, 'link', 1, 10, 'commande_fournisseur', 0, 0, '', $param, 1, '', 3, $help, '', 0, 'ofsom@interentitydocuments', 1);
-		$e->updateExtraField($key, $label, 'link', 1, 10, 'commande_fournisseur', 0, 0, '', $param, 1, '', 3, $help, '', 0, 'ofsom@interentitydocuments', 1);
+		$e->addExtraField($key, $label, 'link', 1, 10, 'commande_fournisseur', 0, 0, '', $param, 1, '', 3, $help, '', 0, 'ied@interentitydocuments', 1);
+		$e->updateExtraField($key, $label, 'link', 1, 10, 'commande_fournisseur', 0, 0, '', $param, 1, '', 3, $help, '', 0, 'ied@interentitydocuments', 1);
 
 		// Extrafield de liaison entre la ligne de commande fournisseur et la ligne de commande créée
 		$label = 'supplierOrderDetSource';
 		$help  = 'supplierOrderDetSourceHelp';
 		$key   = 'supplier_order_det_source';
-		$e->addExtraField($key, $label, 'int', 1, 10, 'commandedet', 0, 0, '', '', 0, '', 0, $help, '', 0, 'ofsom@interentitydocuments');
+		$e->addExtraField($key, $label, 'int', 1, 10, 'commandedet', 0, 0, '', '', 0, '', 0, $help, '', 0, 'ied@interentitydocuments');
 
         return $this->_init($sql, $options);
     }
@@ -478,8 +458,7 @@ class modinterentitydocuments extends DolibarrModules
 
     /**
      * Create tables, keys and data required by module
-     * Files llx_table1.sql, llx_table1.key.sql llx_data.sql with create table, create keys
-     * and create data commands must be stored in directory /interentitydocuments/sql/
+     * SQL files must be stored in directory /interentitydocuments/sql/
      * This function is called by this->init
      *
      * 	@return		int		<=0 if KO, >0 if OK

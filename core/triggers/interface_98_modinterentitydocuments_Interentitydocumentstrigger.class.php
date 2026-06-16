@@ -1,6 +1,7 @@
 <?php
-/* <one line to give the program's name and a brief idea of what it does.>
+/* Trigger handlers for the Documents inter-entités module.
  * Copyright (C) 2013 ATM Consulting <support@atm-consulting.fr>
+ * Copyright (C) 2026 Pierre Ardoin <developpeur@lesmetiersdubatiment.fr>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,17 +18,9 @@
  */
 
 /**
- *    \file        core/triggers/interface_99_modMyodule_Mytrigger.class.php
+ *    \file        core/triggers/interface_98_modinterentitydocuments_Interentitydocumentstrigger.class.php
  *    \ingroup    interentitydocuments
- *    \brief        Sample trigger
- *    \remarks    You can create other triggers by copying this one
- *                - File name should be either:
- *                    interface_99_modMymodule_Mytrigger.class.php
- *                    interface_99_all_Mytrigger.class.php
- *                - The file must stay in core/triggers
- *                - The class name must be InterfaceMytrigger
- *                - The constructor method must be named InterfaceMytrigger
- *                - The name property name must be Mytrigger
+ *    \brief       Inter-entity document synchronization triggers.
  */
 
 /**
@@ -59,12 +52,10 @@ class Interfaceinterentitydocumentstrigger
 		$this->db = $db;
 
 		$this->name = preg_replace('/^Interface/i', '', get_class($this));
-		$this->family = "demo";
-		$this->description = "Triggers of this module are empty functions."
-			. "They have no effect."
-			. "They are provided for tutorial purpose only.";
+		$this->family = "interentitydocuments";
+		$this->description = "Synchronize inter-entity documents, PDFs, statuses and payments.";
 		// 'development', 'experimental', 'dolibarr' or version
-		$this->version = 'development';
+		$this->version = '1.0.0';
 		$this->picto = 'interentitydocuments@interentitydocuments';
 		$this->errors=array();
 	}
@@ -141,7 +132,7 @@ class Interfaceinterentitydocumentstrigger
 			// Si l'option de réception auto est active, une commande fournisseur liée
 			// à une entité Dolibarr doit porter son entrepôt de réception.
 			$receptionWarehouseId = $this->getSupplierOrderReceptionWarehouseId($object);
-			if(!empty($conf->global->OFSOM_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED) && $receptionWarehouseId <= 0) {
+			if(!empty($conf->global->IED_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED) && $receptionWarehouseId <= 0) {
 				dol_include_once('/interentitydocuments/class/telink.class.php');
 				$telink = new TTELink();
 				$res = $telink->getSocEntityFromSocId($object->socid);
@@ -161,18 +152,19 @@ class Interfaceinterentitydocumentstrigger
 		}
 
 
-		if (($action === 'ORDER_SUPPLIER_VALIDATE' && empty($conf->global->OFSOM_STATUS))
-			|| $action === $conf->global->OFSOM_STATUS)
+		$linkedSupplierOrderTrigger = !empty($conf->global->IED_STATUS) ? $conf->global->IED_STATUS : '';
+		if (($action === 'ORDER_SUPPLIER_VALIDATE' && empty($linkedSupplierOrderTrigger))
+			|| (!empty($linkedSupplierOrderTrigger) && $action === $linkedSupplierOrderTrigger))
 		{
 			// Transmission de la commande fournisseur vers l'entité fournisseur pour création commande client
 			return $this->_cloneOrder($object);
 		}
-		elseif ($action === 'BILL_VALIDATE' && !empty($conf->global->OFSOM_AUTO_CREATE_SUPPLIER_INVOICE)) {
+		elseif ($action === 'BILL_VALIDATE' && !empty($conf->global->IED_AUTO_CREATE_SUPPLIER_INVOICE)) {
 			/** @var Facture $object */
 			// Création automatique de la facture fournisseur dans l'entité de destination
 			return $this->_cloneInvoice($object);
 		}
-		elseif ($action === 'ORDER_VALIDATE' && !empty($conf->global->OFSOM_AUTO_CREATE_SUPPLIER_ORDER_FROM_CUSTOMER_ORDER)) {
+		elseif ($action === 'ORDER_VALIDATE' && !empty($conf->global->IED_AUTO_CREATE_SUPPLIER_ORDER_FROM_CUSTOMER_ORDER)) {
 			/** @var Commande $object */
 			// Création automatique de la commande fournisseur dans l'entité de destination.
 			return $this->_cloneSupplierOrderFromCustomerOrder($object);
@@ -182,7 +174,7 @@ class Interfaceinterentitydocumentstrigger
 			return 0;
 		}
 		elseif ($action === 'PAYMENT_CUSTOMER_CREATE') {
-			if (!empty($conf->global->OFSOM_AUTO_CREATE_SUPPLIER_PAYMENT_FROM_CUSTOMER_PAYMENT)) {
+			if (!empty($conf->global->IED_AUTO_CREATE_SUPPLIER_PAYMENT_FROM_CUSTOMER_PAYMENT)) {
 				$result = $this->syncSupplierPaymentFromCustomerPayment($object, $user);
 				if ($result < 0) {
 					return -1;
@@ -192,7 +184,7 @@ class Interfaceinterentitydocumentstrigger
 			return 0;
 		}
 		elseif ($action === 'PAYMENT_SUPPLIER_CREATE') {
-			if (!empty($conf->global->OFSOM_AUTO_CREATE_CUSTOMER_PAYMENT_FROM_SUPPLIER_PAYMENT)) {
+			if (!empty($conf->global->IED_AUTO_CREATE_CUSTOMER_PAYMENT_FROM_SUPPLIER_PAYMENT)) {
 				$result = $this->syncCustomerPaymentFromSupplierPayment($object, $user);
 				if ($result < 0) {
 					return -1;
@@ -205,7 +197,7 @@ class Interfaceinterentitydocumentstrigger
 
 			require_once DOL_DOCUMENT_ROOT . '/commande/class/commande.class.php';
 
-			if (!empty($conf->global->OFSOM_LINK_STATUSSUPPLIERORDER_ORDERCHILD)) {
+			if (!empty($conf->global->IED_LINK_STATUSSUPPLIERORDER_ORDERCHILD)) {
 				$sql = "SELECT fk_target FROM " . MAIN_DB_PREFIX . "element_element WHERE fk_source ='" . $object->id . "' AND targettype = 'commande' AND sourcetype ='commandefourn'";
 				$resql = $this->db->query($sql);
 
@@ -247,7 +239,7 @@ class Interfaceinterentitydocumentstrigger
 			require_once DOL_DOCUMENT_ROOT . '/commande/class/commande.class.php';
 			require_once DOL_DOCUMENT_ROOT . '/fourn/class/fournisseur.commande.dispatch.class.php';
 
-			if (!empty($conf->global->OFSOM_LINK_STATUSSUPPLIERORDER_ORDERCHILD)) {
+			if (!empty($conf->global->IED_LINK_STATUSSUPPLIERORDER_ORDERCHILD)) {
 				$error = 0;
 
 				$langs->load('interentitydocuments@interentitydocuments');
@@ -363,7 +355,7 @@ class Interfaceinterentitydocumentstrigger
 													$conf->global->STOCK_CALCULATE_ON_SUPPLIER_DISPATCH_ORDER = 1;
 
 												if ($res==-2) {
-													$this->errors[]=$langs->trans('OFSOMErrorBadStatusOrder',$commandeFournChild->ref);
+													$this->errors[]=$langs->trans('IEDErrorBadStatusOrder',$commandeFournChild->ref);
 													$error++;
 												} elseif ($res < 0) {
 													$this->errors[] =$commandeFournChild->error;
@@ -394,7 +386,7 @@ class Interfaceinterentitydocumentstrigger
 
 			return 0;
 		}
-		else if ($action === 'LINEORDER_UPDATE' && !empty($conf->global->OFSOM_UPDATE_LINE_SOURCE)) {
+		else if ($action === 'LINEORDER_UPDATE' && !empty($conf->global->IED_UPDATE_LINE_SOURCE)) {
 			if ($object->oldline->qty != $object->qty || $object->oldline->subprice != $object->subprice) {
 				$conf->supplierorderdet->enabled = 1;
                 dol_include_once('/fourn/class/fournisseur.commande.class.php');
@@ -455,7 +447,7 @@ class Interfaceinterentitydocumentstrigger
 		else if ($action === 'LINEORDER_INSERT') {
 			if (!empty($object->origin_id)) $object->add_object_linked($object->origin, $object->origin_id);
 
-			if (!empty($conf->global->OFSOM_UPDATE_ORDER_SOURCE) && $object->origin != 'supplierorderdet') {
+			if (!empty($conf->global->IED_UPDATE_ORDER_SOURCE) && $object->origin != 'supplierorderdet') {
 				$conf->commandefourn = new stdClass();
 				$conf->commandefourn->enabled = 1;
 
@@ -481,7 +473,7 @@ class Interfaceinterentitydocumentstrigger
 			}
 		}
 		else if ($action === 'LINEORDER_DELETE') {
-			if (!empty($conf->global->OFSOM_UPDATE_ORDER_SOURCE)) {
+			if (!empty($conf->global->IED_UPDATE_ORDER_SOURCE)) {
 				$conf->supplierorderdet = new stdClass();
 				$conf->supplierorderdet->enabled = 1;
 
@@ -517,11 +509,11 @@ class Interfaceinterentitydocumentstrigger
 
 			}
 		}
-		else if ($action == 'SHIPPING_CLOSED' && !empty($conf->global->OFSOM_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED))
+		else if ($action == 'SHIPPING_CLOSED' && !empty($conf->global->IED_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED))
 		{
 			/** @var Expedition $object */
 			//  Passe la commande fournisseur à reçut (entité A) lors de la cloture de l'expedition (Entité courrante)
-			if(!empty($conf->global->OFSOM_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED)){
+			if(!empty($conf->global->IED_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED)){
 				return $this->receiveSupplierOrderFromShipment($object);
 			}
 		}
@@ -1264,7 +1256,7 @@ class Interfaceinterentitydocumentstrigger
 	 */
 	private function getCustomerPaymentBankAccountIdForEntity($entity)
 	{
-		return $this->getIntegerConstantForEntity('OFSOM_CUSTOMER_PAYMENT_BANK_ACCOUNT_ID', $entity);
+		return $this->getIntegerConstantForEntity('IED_CUSTOMER_PAYMENT_BANK_ACCOUNT_ID', $entity);
 	}
 
 	/**
@@ -1275,7 +1267,7 @@ class Interfaceinterentitydocumentstrigger
 	 */
 	private function getSupplierPaymentBankAccountIdForEntity($entity)
 	{
-		return $this->getIntegerConstantForEntity('OFSOM_SUPPLIER_PAYMENT_BANK_ACCOUNT_ID', $entity);
+		return $this->getIntegerConstantForEntity('IED_SUPPLIER_PAYMENT_BANK_ACCOUNT_ID', $entity);
 	}
 
 	/**

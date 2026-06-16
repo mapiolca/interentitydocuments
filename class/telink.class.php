@@ -469,7 +469,7 @@ class TTELink
 				$o->lines[] = $lineOrder;
 			}
 
-			if (!empty($conf->global->OFSOM_DONT_FORCE_BUY_PRICE_WITH_SELL_PRICE)) {
+			if (!empty($conf->global->IED_DONT_FORCE_BUY_PRICE_WITH_SELL_PRICE)) {
 				$oldval = $conf->global->ForceBuyingPriceIfNull;
 				$conf->global->ForceBuyingPriceIfNull = 0;
 			}
@@ -477,7 +477,7 @@ class TTELink
 			$orderCreatedRes = $o->create($user);
 
 			if ($orderCreatedRes < 0) {
-				if (!empty($conf->global->OFSOM_DONT_FORCE_BUY_PRICE_WITH_SELL_PRICE)) $conf->global->ForceBuyingPriceIfNull = $oldval;
+				if (!empty($conf->global->IED_DONT_FORCE_BUY_PRICE_WITH_SELL_PRICE)) $conf->global->ForceBuyingPriceIfNull = $oldval;
 				$this->error = $o->error;
 				return -4;
 			} else {
@@ -543,7 +543,7 @@ class TTELink
 				$this->copySourcePdfToTargetDocuments($cf, $o, (int) $toEntity, true);
 			}
 
-			if (!empty($conf->global->OFSOM_DONT_FORCE_BUY_PRICE_WITH_SELL_PRICE)) $conf->global->ForceBuyingPriceIfNull = $oldval;
+			if (!empty($conf->global->IED_DONT_FORCE_BUY_PRICE_WITH_SELL_PRICE)) $conf->global->ForceBuyingPriceIfNull = $oldval;
 
 			return $orderCreatedRes;
 		} else {

@@ -1,33 +1,34 @@
 Module450020Name = Documents inter-entités
-Module450020Desc = Créé des des documents depuis d'autres entités multicompany
+Module450020Desc = Crée des documents liés entre entités Multicompany
 interentitydocumentsSetupPage=Ajoutez ici la correspondance entre un tiers et une entité.
-interentitydocumentsSetup=Créé des des documents depuis d'autres entités multicompany
+interentitydocumentsSetup=Réglages des documents inter-entités
+interentitydocumentsCompatibility=Compatibilité
 interentitydocumentsAbout=À propos
 interentitydocumentsAboutPage=Informations sur le module Documents inter-entités.
 interentitydocumentsReadmeMissing=Le fichier README.md du module est introuvable ou illisible.
 
 # CONF
 
-OFSOMStatusConf = Status d'une commande fournisseur qui permet la création d'une commande liée
-OFSOMLinkStatusSupplierOrderOrderChild = Lors de la réception d'une commande fournisseur, classer les commandes client liées en "Traitée"
-OFSOMUpdateLineSource = Après modification du prix d'achat ou quantité sur la ligne commande client, met à jour la ligne sur la commande fournisseur associée
+IEDStatusConf = Statut d'une commande fournisseur qui permet la création d'une commande liée
+IEDLinkStatusSupplierOrderOrderChild = Lors de la réception d'une commande fournisseur, classer les commandes client liées en "Traitée"
+IEDUpdateLineSource = Après modification du prix d'achat ou de la quantité sur une ligne de commande client, mettre à jour la ligne de commande fournisseur associée
 
-OFSOMErrorBadStatusOrder = La commande fournisseur %s de l'entité mère n'est pas dans un statut permettant la réception de votre commande fournisseur à vous
+IEDErrorBadStatusOrder = La commande fournisseur %s de l'entité mère n'est pas dans un statut permettant la réception de votre commande fournisseur
 
-OFSOMUpdateOrderSource = Après ajout ou suppression d'une ligne sur la commande client, ajoute ou supprime la ligne sur la commande fournisseur source
-OFSOM_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED = Passe la commande fournisseur à reçue (côté entité cliente) lors de la clôture de l'expédition (entité fournisseur)
-OFSOM_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED_HELP = <strong>ATTENTION</strong> : <ul><li>Le partage des produits entre les entités correspondantes doit être actif</li><li>Cette option est à activer sur l'entité fournisseur</li></ul>
+IEDUpdateOrderSource = Après ajout ou suppression d'une ligne sur la commande client, ajouter ou supprimer la ligne sur la commande fournisseur source
+IED_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED = Passer la commande fournisseur à reçue (côté entité cliente) lors de la clôture de l'expédition (entité fournisseur)
+IED_SET_SUPPLIER_ORDER_RECEIVED_ON_SUPPLIER_SHIPMENT_CLOSED_HELP = <strong>ATTENTION</strong> : <ul><li>Le partage des produits entre les entités correspondantes doit être actif</li><li>Cette option est à activer sur l'entité fournisseur</li></ul>
 ThisEntityMappingNeedToBeDoneOnEachEntityListed = La liaison entre les tiers doit être effectuée sur chaque entité pour permettre les échanges bidirectionnels
 
 ReceptionWarehouseNotDefined = Entrepôt de réception auto non défini sur la commande fournisseur
 ReceptionWarehouseCheckError = Une erreur s'est produite lors de la vérification de "l'entrepôt de réception auto"
 ReceiveFromAutoWorkflowForSupplierShipment = Réception depuis l'expédition %s du fournisseur
-OFSOM_AUTO_CREATE_SUPPLIER_INVOICE = Créer automatiquement la facture fournisseur dans l'entité de destination lors de la validation d'une facture client vers un tiers multicompany
-OFSOM_AUTO_CREATE_SUPPLIER_ORDER_FROM_CUSTOMER_ORDER = Créer automatiquement la commande fournisseur dans l'entité de destination lors de la validation d'une commande client vers un tiers multicompany
-OFSOM_AUTO_CREATE_CUSTOMER_PAYMENT_FROM_SUPPLIER_PAYMENT = Créer automatiquement le règlement client source lors de la création d'un règlement fournisseur inter-entités
-OFSOM_CUSTOMER_PAYMENT_BANK_ACCOUNT_ID = Compte bancaire d'encaissement des règlements clients inter-entités
-OFSOM_AUTO_CREATE_SUPPLIER_PAYMENT_FROM_CUSTOMER_PAYMENT = Créer automatiquement le règlement fournisseur cible lors de la création d'un paiement client inter-entités
-OFSOM_SUPPLIER_PAYMENT_BANK_ACCOUNT_ID = Compte bancaire de décaissement des règlements fournisseurs inter-entités
+IED_AUTO_CREATE_SUPPLIER_INVOICE = Créer automatiquement la facture fournisseur dans l'entité de destination lors de la validation d'une facture client vers un tiers multicompany
+IED_AUTO_CREATE_SUPPLIER_ORDER_FROM_CUSTOMER_ORDER = Créer automatiquement la commande fournisseur dans l'entité de destination lors de la validation d'une commande client vers un tiers multicompany
+IED_AUTO_CREATE_CUSTOMER_PAYMENT_FROM_SUPPLIER_PAYMENT = Créer automatiquement le règlement client source lors de la création d'un règlement fournisseur inter-entités
+IED_CUSTOMER_PAYMENT_BANK_ACCOUNT_ID = Compte bancaire d'encaissement des règlements clients inter-entités
+IED_AUTO_CREATE_SUPPLIER_PAYMENT_FROM_CUSTOMER_PAYMENT = Créer automatiquement le règlement fournisseur cible lors de la création d'un paiement client inter-entités
+IED_SUPPLIER_PAYMENT_BANK_ACCOUNT_ID = Compte bancaire de décaissement des règlements fournisseurs inter-entités
 InterentityCustomerPaymentMirrorNote = Règlement client inter-entités créé depuis le règlement fournisseur %s.
 InterentityCustomerPaymentMirrorFailed = Impossible de créer le règlement client inter-entités.
 InterentityCustomerPaymentMirrorMissingInvoice = Facture client source introuvable pour la facture fournisseur réglée.
@@ -36,4 +37,37 @@ InterentitySupplierPaymentMirrorNote = Règlement fournisseur inter-entités cr�
 InterentitySupplierPaymentMirrorFailed = Impossible de créer le règlement fournisseur inter-entités.
 InterentitySupplierPaymentMirrorMissingInvoice = Facture fournisseur cible introuvable pour la facture client réglée.
 InterentitySupplierPaymentMirrorMissingThirdparty = Tiers fournisseur introuvable sur la facture fournisseur cible.
-ParamOFSOMStatus = Paramétrer les gestions de statut
+ParamIEDStatus = Paramétrer la gestion des statuts
+SupplierOrderValidate = Valider
+SupplierOrderSubmit = Commander
+
+# Compatibility and about
+DetectedPhpVersion = Version PHP détectée
+DetectedDolibarrVersion = Version Dolibarr détectée
+MinimumPhpVersion = Version PHP minimale supportée
+MinimumDolibarrVersion = Version Dolibarr minimale supportée
+Feature = Fonctionnalité
+Available = Disponible
+Unavailable = Indisponible
+Reason = Motif
+ModuleInformation = Informations du module
+Publisher = Éditeur
+CompatibilitySummary = Dolibarr v20+ et PHP 8.0+
+MainFeatures = Fonctionnalités principales
+AboutFeatureDocumentCloning = Création de documents liés entre commandes et factures de plusieurs entités.
+AboutFeaturePdfSync = Recopie du PDF source vers le dossier documentaire de l'objet lié.
+AboutFeaturePaymentMirroring = Création optionnelle de règlements miroirs entre factures liées.
+CompatibilityFeatureModuleBaseline = Socle du module
+CompatibilityFeatureModuleBaselineDesc = Compatibilité minimale requise par le module.
+CompatibilityFeaturePdfSync = Synchronisation PDF
+CompatibilityFeaturePdfSyncDesc = Recopie de PDF entre documents liés.
+CompatibilityFeaturePdfGenerationHook = Hook de génération PDF
+CompatibilityFeaturePdfGenerationHookDesc = Synchronisation après génération native d'un PDF.
+CompatibilityFeaturePaymentMirroring = Règlements miroirs
+CompatibilityFeaturePaymentMirroringDesc = Création automatique de règlements liés entre entités.
+CompatibilityFeatureMulticompany = Dépendance Multicompany
+CompatibilityFeatureMulticompanyDesc = Le module nécessite le module Multicompany.
+RequiresDolibarrVersion = Version Dolibarr insuffisante
+RequiresPhpVersion = Version PHP insuffisante
+RequiresDolibarrFilesHelpers = Helpers fichiers Dolibarr indisponibles
+RequiresMulticompany = Module Multicompany indisponible

@@ -1,6 +1,7 @@
 <?php
-/* <one line to give the program's name and a brief idea of what it does.>
+/* Admin helpers for the Documents inter-entités module.
  * Copyright (C) 2013 ATM Consulting <support@atm-consulting.fr>
+ * Copyright (C) 2026 Pierre Ardoin <developpeur@lesmetiersdubatiment.fr>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,8 +20,7 @@
 /**
  *	\file		lib/interentitydocuments.lib.php
  *	\ingroup	interentitydocuments
- *	\brief		This file is an example module library
- *				Put some comments here
+ *	\brief		Admin tab helpers.
  */
 
 function interentitydocumentsAdminPrepareHead()
@@ -32,9 +32,13 @@ function interentitydocumentsAdminPrepareHead()
     $h = 0;
     $head = array();
 
-    $head[$h][0] = dol_buildpath("/interentitydocuments/admin/interentitydocuments_setup.php", 1);
+    $head[$h][0] = dol_buildpath("/interentitydocuments/admin/setup.php", 1);
     $head[$h][1] = $langs->trans("Settings");
     $head[$h][2] = 'settings';
+    $h++;
+    $head[$h][0] = dol_buildpath("/interentitydocuments/admin/compatibility.php", 1);
+    $head[$h][1] = $langs->trans("Compatibility");
+    $head[$h][2] = 'compatibility';
     $h++;
     $head[$h][0] = dol_buildpath("/interentitydocuments/admin/about.php", 1);
     $head[$h][1] = $langs->trans("About");
