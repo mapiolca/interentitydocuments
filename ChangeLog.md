@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.0.1 - 2026-08-25
+
+- Suppression des propriétés dynamiques obsolètes du descripteur sous PHP 8.2.
+
 ## Non publié - 2026-06-16
 
 - Remplacement du logo du module par les variantes Dolibarr 32x32 et 16x16 fournies.

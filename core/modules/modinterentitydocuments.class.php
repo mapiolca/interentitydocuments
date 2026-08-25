@@ -54,13 +54,12 @@ class modinterentitydocuments extends DolibarrModules
         $this->name = preg_replace('/^mod/i', '', get_class($this));
         $this->description = "Create linked documents between Multicompany entities";
         // Possible values for version are: 'development', 'experimental' or version
-        $this->version = '1.0.0';
+        $this->version = '1.0.1';
         // Key used in the Dolibarr constants table to save module status enabled/disabled
         // (where MYMODULE is value of property name of module in uppercase)
         $this->const_name = 'MAIN_MODULE_' . strtoupper($this->name);
         // Where to store the module in setup page
         // (0=common,1=interface,2=others,3=very specific)
-        $this->special = 2;
         $this->picto = 'interentitydocuments@interentitydocuments';
         // Defined all module parts (triggers, login, substitutions, menus, css, etc...)
         // for default path (eg: /interentitydocuments/core/xxxxx) (0=disable, 1=enable)
@@ -158,11 +157,11 @@ class modinterentitydocuments extends DolibarrModules
             $conf->interentitydocuments=new stdClass();
             $conf->interentitydocuments->enabled = 0;
         }
-        $this->dictionnaries = array();
+        $this->dictionaries = array();
         /* Example:
           // This is to avoid warnings
           if (! isset($conf->interentitydocuments->enabled)) $conf->interentitydocuments->enabled=0;
-          $this->dictionnaries=array(
+          $this->dictionaries=array(
           'langs'=>'interentitydocuments@interentitydocuments',
           // List of tables we want to see into dictonnary editor
           'tabname'=>array(
@@ -224,7 +223,7 @@ class modinterentitydocuments extends DolibarrModules
         //$this->rights[$r][5] = 'level2';
         //$r++;
         // Main menu entries
-        $this->menus = array(); // List of menus to add
+        $this->menu = array(); // List of menus to add
         $r = 0;
 
         // Add here entries to declare new menus
