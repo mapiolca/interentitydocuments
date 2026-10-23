@@ -68,6 +68,12 @@ class CommonObject extends stdClass
 
 class Commande extends CommonObject
 {
+	public function generateDocument($model, $outputlangs)
+	{
+		$this->db->pdfGenerations++;
+		return 1;
+	}
+
 	public function fetch($id)
 	{
 		foreach (array('id' => $id, 'entity' => 1, 'socid' => 10, 'ref' => 'CO-TEST', 'date' => 1,
@@ -135,6 +141,7 @@ class IedTestDb
 	public $creates = 0;
 	public $deletes = 0;
 	public $writes = 0;
+	public $pdfGenerations = 0;
 	public $errno = '';
 
 	public function query($sql)
@@ -323,6 +330,12 @@ $scenarios = array(
 		list($result, $trigger) = runValidationTrigger();
 		check($result === 99 && $trigger->errors === array(), 'Successful creation reported an error');
 		check($GLOBALS['db']->creates === 1 && $GLOBALS['db']->writes === 2, 'The native creation/link workflow changed');
+	},
+	'validation must leave PDF generation and ECM renaming to the native caller' => static function () {
+		list($result) = runValidationTrigger();
+		check($result === 99, 'The business clone failed before native finalization');
+		check($GLOBALS['db']->pdfGenerations === 0, 'A definitive PDF was generated before the native draft rename');
+		check($GLOBALS['db']->writes === 2, 'The validation trigger changed the document index');
 	},
 	'customer orders originating from supplier orders must be skipped' => static function () {
 		$GLOBALS['db']->hasOrigin = true;

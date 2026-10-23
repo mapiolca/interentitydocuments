@@ -744,9 +744,11 @@ class TTELink
 			return $this->failSupplierOrderClone('link_orders', -6, $context, $db->lasterror());
 		}
 
-		$supplierOrder->entity = (int) $toEntity;
-		$pdfResult = $this->copySourcePdfToTargetDocuments($order, $supplierOrder, (int) $toEntity, true);
-		dol_syslog(__METHOD__.' action=ORDER_VALIDATE stage=clone_returned source_order_id='.(int) $order->id.' supplier_order_id='.(int) $supplierOrder->id.' target_entity='.(int) $toEntity.' result='.(int) $orderCreatedRes.' pdf_result='.(int) $pdfResult.' transaction=caller', LOG_INFO);
+		// ORDER_VALIDATE runs before Commande::valid() renames the draft PDF and its ECM entry.
+		// Generating the definitive PDF here makes that native rename fail on uk_ecm_files.
+		// The existing afterPDFCreation hook copies the PDF after native generation instead.
+		dol_syslog(__METHOD__.' action=ORDER_VALIDATE stage=copy_source_pdf source_order_id='.(int) $order->id.' target_entity='.(int) $toEntity.' result=0 reason=awaiting_native_pdf', LOG_DEBUG);
+		dol_syslog(__METHOD__.' action=ORDER_VALIDATE stage=clone_returned source_order_id='.(int) $order->id.' supplier_order_id='.(int) $supplierOrder->id.' target_entity='.(int) $toEntity.' result='.(int) $orderCreatedRes.' pdf_result=0 transaction=caller', LOG_INFO);
 
 		return $orderCreatedRes;
 	}

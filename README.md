@@ -36,11 +36,14 @@ Les traces identifient la commande source, les entités source/cible, le tiers c
 | `fetch_existing_order`, `delete_existing_order` et leurs variantes `_exception` | Chargement ou remplacement d'une commande fournisseur existante |
 | `create_supplier_order`, `create_supplier_order_exception` | Création native de la commande fournisseur, y compris ses lignes et triggers |
 | `assign_target_entity`, `link_orders` | Affectation de l'entité propriétaire ou création du lien entre commandes |
-| `clone_returned` | Retour de la synchronisation, avec le résultat facultatif de la copie PDF |
+| `copy_source_pdf` | Copie différée jusqu'au hook natif `afterPDFCreation` (`reason=awaiting_native_pdf`) |
+| `clone_returned` | Retour du clonage métier, avant la finalisation de la validation native |
 
 `reason=missing_reverse_mapping` signifie que les réglages de l'entité cible doivent comporter un tiers représentant l'entité source. Cette configuration n'est pas créée automatiquement. Les échecs de lecture SQL restent bloquants et les erreurs natives de création restent remontées, même lorsque le core les place uniquement dans son tableau `errors`.
 
 Le contexte d'entité est restauré après les appels natifs, y compris en cas d'exception. `transaction=caller` indique que la validation de commande reste responsable du commit ou du rollback final : le retour du clonage ne prouve pas encore la persistance de la transaction complète.
+
+Lors de `ORDER_VALIDATE`, Dolibarr n'a pas encore renommé le PDF du brouillon et son entrée ECM. Le module attend donc la génération native et son hook `afterPDFCreation` pour copier le PDF dans l'entité cible. Générer le PDF définitif dans ce trigger provoquerait un doublon `uk_ecm_files` au renommage et annulerait la validation. Si la génération automatique est désactivée, la copie se fait lors de la prochaine génération native du PDF.
 
 Tests de régression isolés, avec objets et réponses SQL simulés (aucune connexion à une instance) :
 
