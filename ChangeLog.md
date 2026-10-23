@@ -1,40 +1,28 @@
 # Change Log
 
+## 1.0.2 - 2026-10-23
+
+- Création automatique des contreparties des flux existants au nom de l’utilisateur initiateur, même sans accès ni droits de création manuelle dans l’entité destinataire : autorisation contrôlée côté source et correspondances configurées conservées. Aucun compte d’exécution à sélectionner ni nouveau flux de facturation.
+- Rechargement temporaire du contexte natif de destination et des droits réels de l’initiateur, sans attribuer de permissions ; restauration du contexte source après succès, refus ou exception. Les contrôles natifs d’approbation et de suppression restent applicables ; les erreurs bancaires sont remontées à la transaction source.
+- Correction du blocage de validation d’un document source disposant déjà d’un PDF de brouillon : la copie inter-entités attend désormais la génération native et le hook `afterPDFCreation`, sans créer de doublon `uk_ecm_files` avant le renommage ECM. Si la génération automatique est désactivée, la copie intervient à la prochaine génération native du PDF.
+- Ajout de journaux de diagnostic pour `ORDER_VALIDATE` précisant l'étape, les identifiants de commande, les entités, le résultat natif et le code d'erreur de base de données, sans exposer de requête SQL ni de contenu client sensible.
+- Restitution des erreurs natives complètes à Dolibarr et message explicite lorsqu'une correspondance inverse entre tiers et entité manque.
+- Arrêt du clonage après une erreur de recherche ou un résultat de création invalide, contrôle de l'entité propriétaire et restauration du contexte d'entité après les appels natifs, y compris en cas d'exception.
+
 ## 1.0.1 - 2026-08-25
 
 - Suppression des propriétés dynamiques obsolètes du descripteur sous PHP 8.2.
 
-## Non publié - 2026-06-16
+## 1.0.0 - 2026-04-29
 
-- Remplacement du logo du module par les variantes Dolibarr 32x32 et 16x16 fournies.
-- Passage du picto du descripteur sur l'icône du module.
-- Renommage strict du préfixe technique de configuration vers `IED_*`, sans migration des anciens réglages.
-- Renommage de la page de configuration principale en `admin/setup.php`.
-- Ajout d'un onglet interne `Compatibilité` et d'une classe centralisée de vérification d'environnement.
-- Mise à jour des métadonnées du descripteur pour Dolibarr v20+ et PHP 8.0+.
-- Remplacement de la suppression par checkbox des mappings par une action dédiée protégée par token.
-- Ajout du diagnostic `AGENT_DIAGNOSTIC.md`.
-
-## Non publié - 2026-06-15
-
-- Génération du PDF du document source et recopie dans le dossier documentaire de l'objet créé dans l'entité de destination.
-- Correction du chemin de recopie PDF Multicompany vers `DOL_DATA_ROOT[/entity]/facture|commande/{ref}`.
-- Correction du doublon ECM lors de la recopie PDF : un PDF source existant est recopié sans régénération.
-- Correction de la résolution `last_main_doc` pour les PDF source des entités Multicompany.
-- Ajout du flux optionnel commande client validée vers commande fournisseur dans l'entité de destination.
-- Ajout du réglage `IED_AUTO_CREATE_SUPPLIER_ORDER_FROM_CUSTOMER_ORDER`.
-- Correction du warning `$object` dans la préparation des onglets admin.
-- Correction de l'onglet À propos sans dépendance à une fonction `Markdown()`.
-- Remplacement d'un accès direct à `$_REQUEST` par `GETPOST()` dans la page de réglages.
-- Conservation de l'entité courante lors d'un échec de suppression d'une commande client cible existante.
-- Correction de l'extrafield d'entrepôt de réception automatique des commandes fournisseur.
-- Alignement de la recopie PDF sur les dossiers documentaires natifs des objets de destination.
-- Déclaration explicite des propriétés du trigger pour éviter les warnings PHP 8.2.
-- Synchronisation des copies PDF après validation, paiement et régénération manuelle avec la référence courante.
-- Correction de la génération forcée du PDF source : un PDF existant est toujours recopié sans réindexation ECM.
-- Ajout du flux optionnel de synchronisation des règlements fournisseur vers les factures client liées.
-- Ajout du flux optionnel de synchronisation des paiements client vers les règlements fournisseur liés.
-
-## 1.0 29/04/2026
-
-- Version initiale / Init changelog
+- Version initiale.
+- Ajout du flux optionnel de création d'une commande fournisseur depuis une commande client validée dans une autre entité, avec le réglage `IED_AUTO_CREATE_SUPPLIER_ORDER_FROM_CUSTOMER_ORDER`.
+- Génération et recopie des PDF sources dans les dossiers documentaires natifs de l'entité propriétaire de l'objet créé ; correction des chemins Multicompany et de la résolution `last_main_doc`.
+- Synchronisation des copies PDF après validation, paiement et régénération manuelle avec la référence courante ; réutilisation d'un PDF source existant sans régénération ni réindexation ECM.
+- Ajout des flux optionnels de synchronisation des règlements fournisseur vers les factures client liées et des paiements client vers les règlements fournisseur liés.
+- Renommage strict des constantes de configuration vers `IED_*`, sans migration des anciens réglages, et de la page principale de réglages en `admin/setup.php`.
+- Ajout d'un onglet interne `Compatibilité`, d'une classe centralisée de vérification d'environnement et des métadonnées Dolibarr v20+ et PHP 8.0+.
+- Utilisation de `GETPOST()` dans les réglages et d'une action dédiée protégée par token pour supprimer les correspondances tiers-entité.
+- Conservation de l'entité courante en cas d'échec de suppression d'une commande client cible et correction de l'extrafield d'entrepôt de réception automatique des commandes fournisseur.
+- Correction de la préparation des onglets admin et de l'onglet À propos sans dépendance à `Markdown()` ; déclaration des propriétés du trigger pour éviter les warnings PHP 8.2.
+- Adoption des logos Dolibarr 32x32 et 16x16 et de l'icône du module dans le descripteur ; ajout du diagnostic `AGENT_DIAGNOSTIC.md`.

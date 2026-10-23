@@ -19,6 +19,11 @@ if (is_file('../../main.inc.php')) require('../../main.inc.php');
 elseif (is_file('../../../main.inc.php')) require('../../../main.inc.php');
 else die('Include of main fails');
 
+/** @var DoliDB $db */
+/** @var Conf $conf */
+/** @var User $user */
+/** @var Translate $langs */
+
 // Libraries
 require_once DOL_DOCUMENT_ROOT . "/core/lib/admin.lib.php";
 require_once '../lib/interentitydocuments.lib.php';
@@ -34,7 +39,7 @@ if (!$user->admin) {
 
 // Parameters
 $action = GETPOST('action', 'aZ09');
-$id = GETPOST('id', 'int');
+$id = GETPOSTINT('id');
 
 /*
  * Actions
@@ -199,7 +204,7 @@ print '<input type="hidden" name="action" value="setconststatus">';
 print '<tr class="oddeven"><td>' . $langs->trans("IEDStatusConf") . '</td>';
 print '<td width="20">&nbsp;</td>';
 print '<td align="left">';
-print $form->selectarray('IED_STATUS', $TTriggers, $selectedStatus, 0, '');
+print $form->selectarray('IED_STATUS', $TTriggers, $selectedStatus, 0, 0);
 print ' <input type="submit" class="button" value="' . $langs->trans("Save") . '">';
 print '</td></tr>';
 print '</form>';
@@ -236,8 +241,11 @@ if ($bankEnabled) {
 	$sql .= ' AND clos = 0';
 	$sql .= ' ORDER BY label, ref';
 	$resql = $db->query($sql);
-	if ($resql) {
-		while ($obj = $db->fetch_object($resql)) {
+	if ($resql && $resql !== true) {
+		while (is_object($obj = $db->fetch_object($resql))) {
+			if (!isset($obj->rowid, $obj->label) || !is_numeric($obj->rowid) || !is_string($obj->label)) {
+				continue;
+			}
 			$label = trim((!empty($obj->ref) ? $obj->ref . ' - ' : '') . $obj->label);
 			$bankAccountOptions[(int) $obj->rowid] = $label;
 		}
