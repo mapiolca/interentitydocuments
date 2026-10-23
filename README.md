@@ -28,6 +28,8 @@ Les traces identifient la commande source, les entités source/cible, le tiers c
 
 | Valeur de `stage` | Contrôle ou opération en échec |
 | --- | --- |
+| `source_permission` | Permission native de validation dans l’entité source |
+| `destination_module`, `destination_delete_permission` | Module destinataire désactivé ou droit de suppression absent pour un remplacement |
 | `target_mapping` | Recherche de l'entité correspondant au tiers de la commande |
 | `fetch_source_order`, `fetch_source_lines`, `check_entities` | Chargement de la commande source, de ses lignes ou contrôle des entités |
 | `origin_lookup` | Recherche d'une commande fournisseur à l'origine de la commande client ; une liaison existante évite une boucle |
@@ -55,20 +57,17 @@ Ces scénarios vérifient la propagation des erreurs, l'arrêt après échec de 
 
 ## Synchronisations sans accès à l’entité destinataire
 
-Dans **chaque entité destinataire**, sélectionner dans les réglages du module un **Utilisateur d’exécution des synchronisations reçues** (`IED_SYNC_USER_ID`). Utiliser un compte interne actif appartenant à cette entité, ou un compte global autorisé. Lui attribuer les droits natifs nécessaires :
+L’utilisateur qui initie l’opération source reste l’auteur des objets et règlements miroirs, y compris des écritures bancaires natives associées. Aucun compte technique ni choix d’utilisateur d’exécution n’est nécessaire. Le module vérifie la permission native de l’opération dans le contexte source, puis utilise les correspondances tiers-entité configurées ou les factures déjà liées pour déterminer la destination. Il n’exige pas les droits de création manuelle ni l’accès de cet utilisateur à l’entité destinataire pour cette création automatique.
 
-- création de commandes clients pour recevoir une commande fournisseur ;
-- création de commandes fournisseurs pour recevoir une commande client ;
-- création de factures fournisseurs pour recevoir une facture client et pour recevoir un règlement fournisseur miroir ;
-- enregistrement des règlements clients pour recevoir un règlement client miroir.
+Cela couvre les commandes dans les deux sens, la facture client vers la facture fournisseur et les règlements dans les deux sens, selon les options existantes. Aucun flux facture fournisseur vers facture client n’est ajouté.
 
-Les commandes et factures créées restent des brouillons selon le comportement existant. Le remplacement d’une contrepartie existante exige aussi son droit de suppression. Les traitements supplémentaires des modules actifs restent soumis aux droits et aux règles de cet utilisateur, notamment une éventuelle approbation. Le module ne lui attribue aucun droit et ne désactive aucun trigger.
+Les commandes et factures créées restent des brouillons selon le comportement existant. Le remplacement d’une contrepartie existante exige toujours le droit natif de suppression dans la destination. Les traitements obligatoires des modules actifs, notamment une approbation, conservent leurs contrôles et leurs erreurs. Le module n’attribue aucun droit, ne transforme pas l’utilisateur en administrateur et ne désactive aucun trigger.
 
-L’utilisateur source effectue uniquement l’opération qu’il est autorisé à réaliser dans son entité. L’automatisme utilise ensuite l’utilisateur configuré dans la destination, y compris pour les appels natifs et la banque. L’utilisateur source ne reçoit aucun accès supplémentaire à cette entité. Sans utilisateur d’exécution configuré, le compte source doit être utilisable dans la destination avec les droits nécessaires.
+La configuration de destination, ses répertoires documentaires, sa société émettrice et son contexte Multicompany sont rechargés temporairement. Une copie en mémoire de l’initiateur garde son identité réelle ; ses permissions source sont vidées avec `User::clearrights()` puis ses permissions réelles dans la destination sont chargées avec `User::loadRights()`, pour les contrôles natifs qui en ont besoin. Le compte original et le contexte source sont restaurés après le traitement, y compris après une exception. Aucun accès manuel à la destination n’est accordé. Le journal technique conserve l’identifiant de l’initiateur et les entités concernées.
 
-La configuration, les répertoires documentaires natifs, la société émettrice et les droits sont rechargés pour la destination. Le contexte source est restauré après le traitement, y compris après une exception. Le journal technique conserve les identifiants de l’utilisateur source et de l’utilisateur d’exécution ; les objets créés portent l’auteur d’exécution natif.
+Le réglage expérimental `IED_SYNC_USER_ID`, s’il a déjà été enregistré avec une révision de cette PR, est ignoré et n’est plus affiché. Aucune purge de configuration n’est effectuée.
 
-Les flux existants et leurs options d’activation sont conservés. Aucun flux facture fournisseur vers facture client n’est ajouté. Une erreur d’un traitement obligatoire est remontée à la transaction source. Une erreur bancaire ne devient pas un succès de synchronisation.
+Une erreur d’un traitement obligatoire est remontée à la transaction source. Une erreur bancaire ne devient pas un succès de synchronisation ; l’appelant natif reste responsable du commit ou rollback final.
 
 La copie du PDF des documents créés attend la génération native de la source et le hook `afterPDFCreation`, afin de ne pas perturber le renommage du PDF provisoire et de son entrée ECM pendant la validation.
 

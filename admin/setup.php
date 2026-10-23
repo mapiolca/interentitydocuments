@@ -38,28 +38,12 @@ if (!$user->admin) {
 }
 
 // Parameters
-$selfPage = isset($_SERVER['PHP_SELF']) && is_string($_SERVER['PHP_SELF']) ? $_SERVER['PHP_SELF'] : '';
 $action = GETPOST('action', 'aZ09');
 $id = GETPOSTINT('id');
 
 /*
  * Actions
  */
-
-if ($action === 'setsyncuser') {
-	$actorId = GETPOSTINT('IED_SYNC_USER_ID');
-	$actor = new User($db);
-	if ($actorId > 0 && ($actor->fetch($actorId, '', '', 0, (int) $conf->entity) <= 0
-		|| (int) $actor->statut !== 1 || (int) $actor->socid > 0)) {
-		setEventMessages($langs->trans('InterentitySyncActorUnavailable', (int) $conf->entity), null, 'errors');
-	} elseif (dolibarr_set_const($db, 'IED_SYNC_USER_ID', $actorId, 'chaine', 0, '', (int) $conf->entity) < 0) {
-		setEventMessages($db->lasterror(), null, 'errors');
-	} else {
-		setEventMessages($langs->trans('RecordSaved'), null, 'mesgs');
-		header('Location: '.$selfPage);
-		exit;
-	}
-}
 
 if ($action == 'setconststatus') {
 	dolibarr_set_const($db, 'IED_STATUS', GETPOST('IED_STATUS', 'aZ09'), 'chaine', 1, '', $conf->entity);
@@ -141,26 +125,6 @@ print dol_get_fiche_head($head, 'settings', $langs->trans("Module450020Name"), $
 print dol_get_fiche_end($notab);
 
 echo '<h3>' . $langs->trans("interentitydocumentsSetupPage") . '</h3>';
-print '<form method="POST" action="'.dol_escape_htmltag($selfPage).'">';
-print '<input type="hidden" name="token" value="'.newToken().'">';
-print '<input type="hidden" name="action" value="setsyncuser">';
-print '<div class="div-table-responsive-no-min"><table class="noborder centpercent">';
-print '<tr class="liste_titre"><td colspan="2">'.$langs->trans('InterentitySyncUser').'</td></tr>';
-print '<tr class="oddeven"><td class="titlefield">'.$langs->trans('User').'</td><td>';
-$syncForm = new Form($db);
-// select_dolusers switched its morefilter contract to USF in Dolibarr 21.
-$syncUserFilter = version_compare(DOL_VERSION, '21.0.0', '>=') ? '(u.fk_soc:is:NULL)' : 'AND u.fk_soc IS NULL';
-$syncUserSelector = $syncForm->select_dolusers(getDolGlobalInt('IED_SYNC_USER_ID') ?: -1, 'IED_SYNC_USER_ID', 1, null, 0, '', '', '0,'.((int) $conf->entity), 0, 0, $syncUserFilter, 0, '', '', 1);
-if (is_string($syncUserSelector)) {
-	print $syncUserSelector;
-} else {
-	print $langs->trans('Error');
-}
-print ajax_combobox('IED_SYNC_USER_ID');
-print ' <input type="submit" class="button" value="'.$langs->trans('Save').'">';
-print '</td></tr><tr><td colspan="2"><span class="opacitymedium">'.$langs->trans('InterentitySyncUserHelp').'</span></td></tr>';
-print '</table></div></form>';
-
 print '<div class="warning">' . $langs->trans('ThisEntityMappingNeedToBeDoneOnEachEntityListed') . '</div>';
 
 $TLink = TTELink::getList();

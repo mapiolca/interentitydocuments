@@ -157,17 +157,17 @@ class Interfaceinterentitydocumentstrigger
 			|| (!empty($linkedSupplierOrderTrigger) && $action === $linkedSupplierOrderTrigger))
 		{
 			// Transmission de la commande fournisseur vers l'entité fournisseur pour création commande client
-			return $this->_cloneOrder($object);
+			return $this->_cloneOrder($object, $user, $action);
 		}
 		elseif ($action === 'BILL_VALIDATE' && !empty($conf->global->IED_AUTO_CREATE_SUPPLIER_INVOICE)) {
 			/** @var Facture $object */
 			// Création automatique de la facture fournisseur dans l'entité de destination
-			return $this->_cloneInvoice($object);
+			return $this->_cloneInvoice($object, $user);
 		}
 		elseif ($action === 'ORDER_VALIDATE' && getDolGlobalInt('IED_AUTO_CREATE_SUPPLIER_ORDER_FROM_CUSTOMER_ORDER')) {
 			/** @var Commande $object */
 			// Création automatique de la commande fournisseur dans l'entité de destination.
-			return $this->_cloneSupplierOrderFromCustomerOrder($object);
+			return $this->_cloneSupplierOrderFromCustomerOrder($object, $user);
 		}
 		elseif (in_array($action, array('BILL_PAYED', 'BILL_UNPAYED', 'BILL_CANCEL', 'BILL_SUPPLIER_PAYED', 'BILL_SUPPLIER_UNPAYED', 'BILL_SUPPLIER_CANCEL'), true)) {
 			$this->syncLinkedTargetPdfs($object, true);
@@ -639,6 +639,10 @@ class Interfaceinterentitydocumentstrigger
 		if (!empty($GLOBALS['INTERENTITYDOCUMENTS_PAYMENT_SYNC_IN_PROGRESS'])) {
 			return 0;
 		}
+		if (!$user->hasRight('facture', 'paiement')) {
+			$this->setError('NotEnoughPermissions');
+			return -1;
+		}
 		if (empty($payment->id)) {
 			return 0;
 		}
@@ -818,13 +822,13 @@ class Interfaceinterentitydocumentstrigger
 		/** @var DoliDB $db */
 		$db = $this->db;
 		$execution = new InterentitydocumentsSyncContext($db);
-		$result = $execution->run($targetEntity, function () use ($customerPayment, $group): int {
+		$result = $execution->run($targetEntity, $user, function () use ($customerPayment, $group): int {
 			global $conf, $user, $langs;
 			/** @var Conf $conf */
 			/** @var User $user */
 			/** @var Translate $langs */
-			if (!isModEnabled('supplier_invoice') || (!$user->hasRight('fournisseur', 'facture', 'creer') && !$user->hasRight('supplier_invoice', 'creer'))) {
-				$this->setError('NotEnoughPermissions');
+			if (!isModEnabled('supplier_invoice')) {
+				$this->setError($langs->trans('ErrorModuleNotEnabled', 'supplier_invoice'));
 				return -1;
 			}
 			$bankAccountId = getDolGlobalInt('IED_SUPPLIER_PAYMENT_BANK_ACCOUNT_ID');
@@ -965,6 +969,10 @@ class Interfaceinterentitydocumentstrigger
 
 		if (!empty($GLOBALS['INTERENTITYDOCUMENTS_PAYMENT_SYNC_IN_PROGRESS'])) {
 			return 0;
+		}
+		if (!$user->hasRight('fournisseur', 'facture', 'creer') && !$user->hasRight('supplier_invoice', 'creer')) {
+			$this->setError('NotEnoughPermissions');
+			return -1;
 		}
 		if (empty($payment->id)) {
 			return 0;
@@ -1145,13 +1153,13 @@ class Interfaceinterentitydocumentstrigger
 		/** @var DoliDB $db */
 		$db = $this->db;
 		$execution = new InterentitydocumentsSyncContext($db);
-		$result = $execution->run($targetEntity, function () use ($supplierPayment, $group): int {
+		$result = $execution->run($targetEntity, $user, function () use ($supplierPayment, $group): int {
 			global $conf, $user, $langs;
 			/** @var Conf $conf */
 			/** @var User $user */
 			/** @var Translate $langs */
-			if (!isModEnabled('facture') || !$user->hasRight('facture', 'paiement')) {
-				$this->setError('NotEnoughPermissions');
+			if (!isModEnabled('facture')) {
+				$this->setError($langs->trans('ErrorModuleNotEnabled', 'facture'));
 				return -1;
 			}
 			$bankAccountId = getDolGlobalInt('IED_CUSTOMER_PAYMENT_BANK_ACCOUNT_ID');
@@ -1373,9 +1381,10 @@ class Interfaceinterentitydocumentstrigger
 	/**
 	 * Crée une commande fournisseur dans l'entité de destination à partir d'une commande client
 	 * @param Commande $object
+	 * @param User $initiator User validating the source order
 	 * @return int Negative on failure, zero if skipped, positive on success
 	 */
-	private function _cloneSupplierOrderFromCustomerOrder($object)
+	private function _cloneSupplierOrderFromCustomerOrder($object, $initiator)
 	{
 		global $conf, $langs;
 		/** @var Conf $conf */
@@ -1417,7 +1426,7 @@ class Interfaceinterentitydocumentstrigger
 			$targetEntity = (int) $obj->fk_entity;
 			dol_syslog('interentitydocuments stage=target_mapping'.$logContext.' target_entity='.$targetEntity, LOG_DEBUG);
 			$TTELink = new TTELink();
-			$res = $TTELink->cloneSupplierOrderFromCustomerOrder($object->id, $targetEntity);
+			$res = $TTELink->cloneSupplierOrderFromCustomerOrder($object->id, $targetEntity, $initiator);
 			if ($res < 0) {
 				$this->error = $TTELink->error;
 				$this->errors = $TTELink->errors;
@@ -1430,7 +1439,7 @@ class Interfaceinterentitydocumentstrigger
 		}
 	}
 
-	private function _cloneOrder($object)
+	private function _cloneOrder($object, User $initiator, string $sourceAction)
 	{
 
 		global $conf, $langs;
@@ -1461,7 +1470,7 @@ class Interfaceinterentitydocumentstrigger
 
 		if (is_object($obj) && isset($obj->fk_entity) && (int) $obj->fk_entity > 0) {
 			$TTELink = new TTELink();
-			$res = $TTELink->cloneOrder($object->id, $obj->fk_entity);
+			$res = $TTELink->cloneOrder($object->id, $obj->fk_entity, $initiator, $sourceAction);
 			if ($res < 0) {
 				$this->setError($TTELink->error);
 			}
@@ -1475,9 +1484,10 @@ class Interfaceinterentitydocumentstrigger
 	/**
 	 * Crée une facture fournisseur dans l'entité de destination à partir d'une facture client
 	 * @param Facture $object
-	 * @return int <0 if KO, 0 if no action, >0 if OK
+	 * @param User $initiator User validating the source invoice
+	 * @return int Negative on failure, zero if skipped, positive on success
 	 */
-	private function _cloneInvoice($object)
+	private function _cloneInvoice($object, $initiator)
 	{
 		global $conf, $langs;
 
@@ -1506,7 +1516,7 @@ class Interfaceinterentitydocumentstrigger
 
 		if (is_object($obj) && isset($obj->fk_entity) && (int) $obj->fk_entity > 0) {
 			$TTELink = new TTELink();
-			$res = $TTELink->cloneInvoice($object->id, $obj->fk_entity);
+			$res = $TTELink->cloneInvoice($object->id, $obj->fk_entity, $initiator);
 			if ($res < 0) {
 				$this->setError($TTELink->error);
 			}

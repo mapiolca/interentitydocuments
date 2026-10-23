@@ -1,7 +1,7 @@
 <?php
 /* Copyright (C) 2026 Pierre Ardoin <developpeur@lesmetiersdubatiment.fr> */
 
-/** Execute configured inter-entity automation with a real destination-side actor. */
+/** Execute configured inter-entity automation while retaining the source initiator. */
 class InterentitydocumentsSyncContext
 {
 	/** @var DoliDB */
@@ -19,10 +19,11 @@ class InterentitydocumentsSyncContext
 	 * The native source operation owns the enclosing transaction. Never grant rights here.
 	 *
 	 * @param int $targetEntity Destination selected by the configured mapping/link
+	 * @param User $initiator User authorized for the source operation
 	 * @param callable(): int $operation Native destination operation
 	 * @return int Native result, negative on configuration or actor failure
 	 */
-	public function run(int $targetEntity, callable $operation): int
+	public function run(int $targetEntity, User $initiator, callable $operation): int
 	{
 		global $conf, $user, $langs, $mysoc, $mc;
 		/** @var Conf $conf */
@@ -40,7 +41,8 @@ class InterentitydocumentsSyncContext
 		$originalExtrafields = $GLOBALS['extrafields'] ?? null;
 		$hadExtrafields = array_key_exists('extrafields', $GLOBALS);
 		$langs->load('interentitydocuments@interentitydocuments');
-		if ($targetEntity <= 0 || (int) $originalUser->id <= 0) {
+		if ($targetEntity <= 0 || (int) $initiator->id <= 0
+			|| (int) $initiator->statut !== 1 || (int) $initiator->socid > 0) {
 			$this->error = $langs->trans('InterentitySyncActorUnavailable', $targetEntity);
 			return -1;
 		}
@@ -59,23 +61,16 @@ class InterentitydocumentsSyncContext
 			if (is_object($originalExtrafields)) {
 				$GLOBALS['extrafields'] = new ExtraFields($this->db);
 			}
-			$actorId = getDolGlobalInt('IED_SYNC_USER_ID');
-			if ($actorId <= 0) {
-				// Legacy behavior is retained only when the original actor exists in the destination.
-				$actorId = (int) $originalUser->id;
-			}
-			$actor = new User($this->db);
-			if ($actor->fetch($actorId) <= 0
-				|| (int) $actor->statut !== 1 || (int) $actor->socid > 0) {
-				$this->error = $langs->trans('InterentitySyncActorUnavailable', $targetEntity);
-				return -1;
-			}
+			// Keep the real author without requiring membership in the destination.
+			// Clear source permissions before loading real destination rights for native checks.
+			$actor = clone $initiator;
+			$actor->clearrights();
 			$actor->loadRights('', 1);
 			$user = $actor;
 			if (is_object($mc)) {
 				$mc->setValues($conf);
 			}
-			dol_syslog(__METHOD__.' source_user_id='.(int) $originalUser->id.' execution_user_id='.(int) $actor->id.' source_entity='.(int) $originalConf->entity.' target_entity='.$targetEntity, LOG_INFO);
+			dol_syslog(__METHOD__.' initiator_user_id='.(int) $initiator->id.' source_entity='.(int) $originalConf->entity.' target_entity='.$targetEntity, LOG_INFO);
 			return $operation();
 		} finally {
 			$mc = $originalMc;

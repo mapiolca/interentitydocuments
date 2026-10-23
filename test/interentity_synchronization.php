@@ -90,15 +90,16 @@ function resetFlow()
 	$GLOBALS['conf']->currency = 'EUR';
 	$GLOBALS['user'] = new User($GLOBALS['db']);
 }
-function invokeFlow($flow)
+function invokeFlow($flow, $supplierAction = 'ORDER_SUPPLIER_VALIDATE')
 {
 	global $db, $conf, $user, $langs;
 	if ($flow === 'supplier_order' || $flow === 'customer_invoice') {
 		$source = $flow === 'supplier_order' ? new CommandeFournisseur($db) : new Facture($db);
 		$source->fetch(42);
 		$conf->global->IED_AUTO_CREATE_SUPPLIER_INVOICE = 1;
+		if ($flow === 'supplier_order') { $conf->global->IED_STATUS = $supplierAction; }
 		$trigger = new Interfaceinterentitydocumentstrigger($db);
-		$result = $trigger->runTrigger($flow === 'supplier_order' ? 'ORDER_SUPPLIER_VALIDATE' : 'BILL_VALIDATE', $source, $user, $langs, $conf);
+		$result = $trigger->runTrigger($flow === 'supplier_order' ? $supplierAction : 'BILL_VALIDATE', $source, $user, $langs, $conf);
 		if ($result > 0) { check($trigger->errors === array(), 'Successful creation reported an error'); }
 		return $result;
 	}
@@ -118,19 +119,46 @@ function invokeFlow($flow)
 }
 
 $flowScenarios = array();
+foreach (array(
+	'supplier_order' => array('fournisseur.commande.creer', 'supplier_order.creer', 'fournisseur.supplier_order_advance.validate'),
+	'customer_invoice' => array('facture.creer', 'facture.invoice_advance.validate'),
+) as $flow => $permissions) {
+	$flowScenarios[$flow.' uses the advanced validation permission in the source'] = static function () use ($flow, $permissions) {
+		$GLOBALS['conf']->global->MAIN_USE_ADVANCED_PERMS = 1;
+		$GLOBALS['db']->deniedSourcePermissions = array_slice($permissions, 0, -1);
+		check(invokeFlow($flow) > 0, 'Advanced validation required manual creation rights');
+	};
+	$flowScenarios[$flow.' refuses missing advanced source validation permission'] = static function () use ($flow, $permissions) {
+		$GLOBALS['conf']->global->MAIN_USE_ADVANCED_PERMS = 1;
+		$GLOBALS['db']->deniedSourcePermissions = array(end($permissions));
+		check(invokeFlow($flow) < 0 && !$GLOBALS['db']->creationActors, 'Missing advanced source validation was bypassed');
+	};
+}
+$flowScenarios['supplier submit requires ordering permission, not validation permission'] = static function () {
+	$GLOBALS['db']->deniedSourcePermissions = array('fournisseur.commande.creer', 'supplier_order.creer', 'fournisseur.supplier_order_advance.validate');
+	check(invokeFlow('supplier_order', 'ORDER_SUPPLIER_SUBMIT') > 0, 'Authorized supplier submit was rejected');
+};
+$flowScenarios['supplier submit refuses missing ordering permission'] = static function () {
+	$GLOBALS['db']->deniedSourcePermissions = array('fournisseur.commande.commander');
+	check(invokeFlow('supplier_order', 'ORDER_SUPPLIER_SUBMIT') < 0 && !$GLOBALS['db']->creationActors, 'Missing source ordering permission was bypassed');
+};
 foreach (array('supplier_order', 'customer_invoice', 'customer_payment', 'supplier_payment') as $flow) {
-	$flowScenarios[$flow.' creates with destination actor and restores caller'] = static function () use ($flow) {
+	$flowScenarios[$flow.' retains the restricted initiator and restores caller'] = static function () use ($flow) {
 		$originalConf = $GLOBALS['conf'];
 		$originalUser = $GLOBALS['user'];
 		$originalCompany = $GLOBALS['mysoc'];
 		$result = invokeFlow($flow);
 		check($result >= 0, 'The automatic flow failed');
-		check($GLOBALS['db']->creationActors === array(array(70, 70, 2)), 'Destination native creation used the wrong actor/entity');
+		check($GLOBALS['db']->creationActors === array(array(7, 7, 2)), 'Destination native creation used the wrong actor/entity');
 		check($GLOBALS['conf'] === $originalConf && $GLOBALS['user'] === $originalUser && $GLOBALS['mysoc'] === $originalCompany, 'Original context was not restored');
 	};
-	$flowScenarios[$flow.' refuses missing destination rights'] = static function () use ($flow) {
+	$flowScenarios[$flow.' needs no manual destination creation rights'] = static function () use ($flow) {
 		$GLOBALS['db']->denyActorRights = true;
-		check(invokeFlow($flow) < 0 && !$GLOBALS['db']->creationActors, 'Missing rights were bypassed');
+		check(invokeFlow($flow) >= 0 && $GLOBALS['db']->creationActors === array(array(7, 7, 2)), 'Destination rights blocked automatic creation');
+	};
+	$flowScenarios[$flow.' refuses missing source authorization'] = static function () use ($flow) {
+		$GLOBALS['db']->denySourceRights = true;
+		check(invokeFlow($flow) < 0 && !$GLOBALS['db']->creationActors, 'Missing source authorization caused a write');
 	};
 }
 
@@ -139,7 +167,7 @@ foreach (array('customer_payment', 'supplier_payment') as $flow) {
 		$GLOBALS['db']->bankAccountId = 5;
 		$GLOBALS['db']->bankResult = -1;
 		check(invokeFlow($flow) < 0, 'Native bank failure was swallowed');
-		check($GLOBALS['db']->bankActors === array(array(70, 70, 2)), 'Bank call used the wrong actor/entity');
+		check($GLOBALS['db']->bankActors === array(array(7, 7, 2)), 'Bank call used the wrong actor/entity');
 		check($GLOBALS['conf']->entity === 1 && $GLOBALS['user']->id === 7, 'Bank failure leaked context');
 		check(empty($GLOBALS['INTERENTITYDOCUMENTS_PAYMENT_SYNC_IN_PROGRESS']), 'Payment recursion guard leaked');
 	};

@@ -90,20 +90,30 @@ class User extends stdClass
 	public $socid = 0;
 	private $db;
 	private $entity = 1;
+	private $permissionsCleared = false;
 
 	public function __construct($db) { $this->db = $db; }
 	public function fetch($id, $login = '', $sid = '', $personal = 0, $entity = -1)
 	{
+		$this->db->userFetches++;
 		$this->id = $id;
 		$this->entity = $entity < 0 ? $GLOBALS['conf']->entity : $entity;
 		$this->statut = $this->db->actorActive ? 1 : 0;
 		$this->socid = $this->db->actorExternal ? 10 : 0;
 		return $this->db->actorExists && ($id !== 7 || !$this->db->sourceRestricted) ? 1 : 0;
 	}
-	public function loadRights($tag = '', $reload = 0) { $this->db->rightsLoads++; }
+	public function clearrights() { $this->permissionsCleared = true; }
+	public function loadRights($tag = '', $reload = 0)
+	{
+		check($this->permissionsCleared, 'Source permissions were carried into the destination');
+		$this->entity = $GLOBALS['conf']->entity;
+		$this->db->rightsLoads++;
+	}
 	public function hasRight(...$permission)
 	{
 		if ($this->db->denyDeleteRight && in_array('supprimer', $permission, true)) { return false; }
+		if ($this->entity === 1 && $this->db->denySourceRights) { return false; }
+		if ($this->entity === 1 && in_array(implode('.', $permission), $this->db->deniedSourcePermissions, true)) { return false; }
 		return !($this->entity === 2 && ($this->db->denyActorRights || ($this->id === 7 && $this->db->sourceRestricted)));
 	}
 }
@@ -189,6 +199,10 @@ class CommandeFournisseur extends CommonObject
 		$this->db->creationActors[] = array($user->id, $GLOBALS['user']->id, $GLOBALS['conf']->entity);
 		$this->db->createdCompanyEntity = $GLOBALS['mysoc']->entity;
 		$this->db->createdMcEntity = $GLOBALS['mc']->entity;
+		if ($this->db->requireApproval && !$user->hasRight('fournisseur', 'commande', 'approuver')) {
+			$this->error = 'Native approval permission missing';
+			return -1;
+		}
 		if ($this->db->throwOnCreate) {
 			throw new RuntimeException('Sensitive exception content');
 		}
@@ -210,6 +224,10 @@ class IedTestDb
 	public $actorActive = true;
 	public $actorExternal = false;
 	public $denyActorRights = false;
+	public $denySourceRights = false;
+	public $deniedSourcePermissions = array();
+	public $userFetches = 0;
+	public $requireApproval = false;
 	public $denyDeleteRight = false;
 	public $configResult = 0;
 	public $changeTimezone = false;
@@ -348,7 +366,7 @@ function runValidationTrigger()
 }
 
 $scenarios = array(
-	'restricted source actor uses the configured destination actor' => static function () {
+	'restricted initiator remains the author despite an obsolete actor setting' => static function () {
 		$db = $GLOBALS['db'];
 		$db->sourceRestricted = true;
 		$db->syncActorId = 70;
@@ -356,28 +374,64 @@ $scenarios = array(
 		$originalConf = $GLOBALS['conf'];
 		list($result) = runValidationTrigger();
 		check($result === 99, 'An authorized automatic creation failed');
-		check($db->creationActors === array(array(70, 70, 2)), 'The native call did not receive the destination actor/context');
+		check($db->creationActors === array(array(7, 7, 2)), 'The native call did not retain the initiator');
 		check($GLOBALS['user'] === $originalUser && $GLOBALS['conf'] === $originalConf, 'Caller identity/configuration changed');
 		check($db->rightsLoads === 1, 'Destination rights were not loaded');
+		check($db->userFetches === 0, 'The initiator was fetched through destination membership filters');
 	},
-	'restricted source without a configured actor fails before writing' => static function () {
+	'restricted initiator needs no destination account setting' => static function () {
 		$GLOBALS['db']->sourceRestricted = true;
 		list($result) = runValidationTrigger();
-		check($result < 0 && $GLOBALS['db']->creates === 0, 'An unavailable actor caused a write');
+		check($result === 99 && $GLOBALS['db']->creationActors === array(array(7, 7, 2)), 'The source initiator could not create the mirror');
 	},
-	'destination rights are never fabricated' => static function () {
-		$GLOBALS['db']->syncActorId = 70;
+	'automatic creation does not require destination manual creation rights' => static function () {
 		$GLOBALS['db']->denyActorRights = true;
 		list($result) = runValidationTrigger();
-		check($result < 0 && $GLOBALS['db']->creates === 0, 'A missing destination right was bypassed');
+		check($result === 99, 'Destination manual creation rights blocked automation');
+	},
+	'authorization is checked in the source entity' => static function () {
+		$GLOBALS['db']->denySourceRights = true;
+		list($result) = runValidationTrigger();
+		check($result < 0 && $GLOBALS['db']->creates === 0, 'Missing source authorization caused a write');
+	},
+	'native approval remains subject to real destination rights' => static function () {
+		$GLOBALS['db']->sourceRestricted = true;
+		$GLOBALS['db']->requireApproval = true;
+		list($result, $trigger) = runValidationTrigger();
+		check($result < 0 && strpos(implode(' ', $trigger->errors), 'Native approval permission missing') !== false, 'Native approval refusal was lost');
+		check($GLOBALS['db']->writes === 0, 'An unapproved object was linked');
+		check($GLOBALS['user']->hasRight('commande', 'creer'), 'Source rights were not restored');
+	},
+	'advanced source validation does not require source creation rights' => static function () {
+		$GLOBALS['conf']->global->MAIN_USE_ADVANCED_PERMS = 1;
+		$GLOBALS['db']->deniedSourcePermissions = array('commande.creer');
+		list($result) = runValidationTrigger();
+		check($result === 99, 'Advanced validation permission was ignored');
+	},
+	'advanced source validation cannot be replaced by creation rights or admin role' => static function () {
+		$GLOBALS['conf']->global->MAIN_USE_ADVANCED_PERMS = 1;
+		$GLOBALS['user']->admin = 1;
+		$GLOBALS['db']->deniedSourcePermissions = array('commande.order_advance.validate');
+		list($result) = runValidationTrigger();
+		check($result < 0 && $GLOBALS['db']->creates === 0, 'Advanced validation rights were bypassed');
+	},
+	'trigger actor is retained even when different from the global user' => static function () {
+		global $db, $conf, $user, $langs;
+		$initiator = new User($db);
+		$initiator->id = 8;
+		$order = new Commande($db);
+		$order->fetch(42);
+		$trigger = new Interfaceinterentitydocumentstrigger($db);
+		$result = $trigger->runTrigger('ORDER_VALIDATE', $order, $initiator, $langs, $conf);
+		check($result === 99 && $db->creationActors === array(array(8, 8, 2)), 'The trigger initiator was replaced by the global user');
+		check($user->id === 7 && $conf->entity === 1, 'Global caller context was not restored');
 	},
 	'disabled destination module prevents automatic creation' => static function () {
 		$GLOBALS['db']->disabledModules = array('supplier_order', 'fournisseur');
 		list($result) = runValidationTrigger();
 		check($result < 0 && $GLOBALS['db']->creates === 0, 'Disabled destination modules were bypassed');
 	},
-	'recreating a counterpart requires the execution user deletion right' => static function () {
-		$GLOBALS['db']->syncActorId = 70;
+	'recreating a counterpart still requires a destination deletion right' => static function () {
 		$GLOBALS['db']->existingSupplierOrder = 88;
 		$GLOBALS['db']->denyDeleteRight = true;
 		list($result) = runValidationTrigger();
@@ -530,12 +584,11 @@ foreach (array('target_mapping', 'origin_lookup', 'reverse_mapping', 'assign_tar
 	};
 }
 
-foreach (array('actorExists', 'actorActive', 'actorExternal') as $property) {
-	$scenarios['invalid destination actor: '.$property] = static function () use ($property) {
-		$GLOBALS['db']->syncActorId = 70;
-		$GLOBALS['db']->{$property} = $property === 'actorExternal';
+foreach (array('id' => 0, 'statut' => 0, 'socid' => 10) as $property => $value) {
+	$scenarios['invalid initiator: '.$property] = static function () use ($property, $value) {
+		$GLOBALS['user']->{$property} = $value;
 		list($result) = runValidationTrigger();
-		check($result < 0 && $GLOBALS['db']->creates === 0, 'An invalid destination actor was used');
+		check($result < 0 && $GLOBALS['db']->creates === 0, 'An invalid initiator was used');
 	};
 }
 

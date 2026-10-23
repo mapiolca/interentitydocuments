@@ -2,9 +2,8 @@
 
 ## 1.0.2 - 2026-10-23
 
-- Ajout d’un utilisateur d’exécution configurable par entité destinataire : les commandes, factures et règlements déjà synchronisés peuvent être créés avec ses droits natifs sans donner à l’utilisateur source un accès à cette entité. Choisir ce compte dans les réglages de chaque destination après mise à jour ; aucun nouveau flux de facturation n’est ajouté.
-- Rechargement du contexte natif de destination et restauration du contexte source après succès, refus ou exception ; propagation des erreurs bancaires à la transaction source.
-
+- Création automatique des contreparties des flux existants au nom de l’utilisateur initiateur, même sans accès ni droits de création manuelle dans l’entité destinataire : autorisation contrôlée côté source et correspondances configurées conservées. Aucun compte d’exécution à sélectionner ni nouveau flux de facturation.
+- Rechargement temporaire du contexte natif de destination et des droits réels de l’initiateur, sans attribuer de permissions ; restauration du contexte source après succès, refus ou exception. Les contrôles natifs d’approbation et de suppression restent applicables ; les erreurs bancaires sont remontées à la transaction source.
 - Correction du blocage de validation d’un document source disposant déjà d’un PDF de brouillon : la copie inter-entités attend désormais la génération native et le hook `afterPDFCreation`, sans créer de doublon `uk_ecm_files` avant le renommage ECM. Si la génération automatique est désactivée, la copie intervient à la prochaine génération native du PDF.
 - Ajout de journaux de diagnostic pour `ORDER_VALIDATE` précisant l'étape, les identifiants de commande, les entités, le résultat natif et le code d'erreur de base de données, sans exposer de requête SQL ni de contenu client sensible.
 - Restitution des erreurs natives complètes à Dolibarr et message explicite lorsqu'une correspondance inverse entre tiers et entité manque.

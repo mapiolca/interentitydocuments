@@ -74,8 +74,6 @@ RequiresPhpVersion = Version PHP insuffisante
 RequiresDolibarrFilesHelpers = Helpers fichiers Dolibarr indisponibles
 RequiresMulticompany = Module Multicompany indisponible
 
-InterentitySyncUser=Utilisateur d’exécution des synchronisations reçues
-InterentitySyncUserHelp=Choisir dans chaque entité destinataire un utilisateur interne actif disposant des droits nécessaires aux créations automatiques et aux éventuels traitements natifs associés. L’utilisateur à l’origine de l’opération conserve ses droits et n’a pas besoin d’accéder à cette entité. Sans sélection, ses propres droits dans la destination s’appliquent. Les règles d’approbation restent applicables à l’utilisateur d’exécution.
-InterentitySyncActorUnavailable=Impossible de synchroniser vers l’entité %s : choisir un utilisateur d’exécution interne actif dans les réglages de cette entité.
+InterentitySyncActorUnavailable=Impossible de synchroniser vers l’entité %s : l’utilisateur initiateur doit être un utilisateur interne actif identifié.
 InterentitySyncConfigurationUnavailable=Impossible de charger la configuration de l’entité destinataire %s.
 InterentitySyncInvalidSourceEntity=L’entité propriétaire du document source est absente ou invalide.

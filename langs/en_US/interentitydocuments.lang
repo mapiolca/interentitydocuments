@@ -70,8 +70,6 @@ RequiresPhpVersion = PHP version is too old
 RequiresDolibarrFilesHelpers = Dolibarr file helpers are unavailable
 RequiresMulticompany = Multicompany module is unavailable
 
-InterentitySyncUser=Execution user for incoming synchronizations
-InterentitySyncUserHelp=Select an active internal user in each destination entity with the permissions needed for automatic creation and associated native processing. The original user keeps their permissions and does not need access to this entity. Without a selection, their own destination permissions apply. Approval rules still apply to the execution user.
-InterentitySyncActorUnavailable=Cannot synchronize to entity %s: select an active internal execution user in that entity’s settings.
+InterentitySyncActorUnavailable=Cannot synchronize to entity %s: the initiating user must be an identified active internal user.
 InterentitySyncConfigurationUnavailable=Cannot load the configuration of destination entity %s.
 InterentitySyncInvalidSourceEntity=The source document owner entity is missing or invalid.

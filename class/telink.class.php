@@ -264,15 +264,22 @@ class TTELink
 	 * Crée une facture fournisseur dans l'entité cible à partir d'une facture client
 	 * @param int $idInvoiceSource ID de la facture client source
 	 * @param int $toEntity ID de l'entité cible
+	 * @param User|null $initiator User validating the source invoice
 	 * @return int >0 if OK, <0 if KO
 	 */
-	public function cloneInvoice($idInvoiceSource, $toEntity)
+	public function cloneInvoice($idInvoiceSource, $toEntity, ?User $initiator = null)
 	{
 		global $db, $conf, $user, $langs;
 		/** @var DoliDB $db */
 		/** @var Conf $conf */
 		/** @var User $user */
 		/** @var Translate $langs */
+		$initiator = $initiator ?? $user;
+		if ((!getDolGlobalString('MAIN_USE_ADVANCED_PERMS') && !$initiator->hasRight('facture', 'creer'))
+			|| (getDolGlobalString('MAIN_USE_ADVANCED_PERMS') && !$initiator->hasRight('facture', 'invoice_advance', 'validate'))) {
+			$this->error = $langs->trans('NotEnoughPermissions');
+			return -1;
+		}
 
 		dol_include_once('/compta/facture/class/facture.class.php');
 		dol_include_once('/fourn/class/fournisseur.facture.class.php');
@@ -299,17 +306,13 @@ class TTELink
 			return -1;
 		}
 		$execution = new InterentitydocumentsSyncContext($db);
-		$result = $execution->run((int) $toEntity, function () use ($db, $facture, $fk_soc, $existingInvoiceId, $toEntity, $idInvoiceSource): int {
+		$result = $execution->run((int) $toEntity, $initiator, function () use ($db, $facture, $fk_soc, $existingInvoiceId, $toEntity, $idInvoiceSource): int {
 			global $conf, $user, $langs;
 			/** @var Conf $conf */
 			/** @var User $user */
 			/** @var Translate $langs */
 			if (!isModEnabled('supplier_invoice')) {
 				$this->error = $langs->trans('ErrorModuleNotEnabled', 'supplier_invoice');
-				return -1;
-			}
-			if (!$user->hasRight('fournisseur', 'facture', 'creer') && !$user->hasRight('supplier_invoice', 'creer')) {
-				$this->error = $langs->trans('NotEnoughPermissions');
 				return -1;
 			}
 			if ($existingInvoiceId > 0) {
@@ -437,14 +440,26 @@ class TTELink
 	/**
 	 * @param int $idOrderSource
 	 * @param int $toEntity
+	 * @param User|null $initiator User performing the source operation
+	 * @param string $sourceAction Native supplier order event
 	 */
-	public function cloneOrder($idOrderSource, $toEntity)
+	public function cloneOrder($idOrderSource, $toEntity, ?User $initiator = null, string $sourceAction = 'ORDER_SUPPLIER_VALIDATE')
 	{
 		global $db, $conf, $user, $mc, $langs;
 		/** @var DoliDB $db */
 		/** @var Conf $conf */
 		/** @var User $user */
 		/** @var Translate $langs */
+		$initiator = $initiator ?? $user;
+		if (($sourceAction === 'ORDER_SUPPLIER_SUBMIT' && !$initiator->hasRight('fournisseur', 'commande', 'commander'))
+			|| ($sourceAction === 'ORDER_SUPPLIER_VALIDATE' && !getDolGlobalString('MAIN_USE_ADVANCED_PERMS')
+				&& !$initiator->hasRight('fournisseur', 'commande', 'creer') && !$initiator->hasRight('supplier_order', 'creer'))
+			|| ($sourceAction === 'ORDER_SUPPLIER_VALIDATE' && getDolGlobalString('MAIN_USE_ADVANCED_PERMS')
+				&& !$initiator->hasRight('fournisseur', 'supplier_order_advance', 'validate'))
+			|| !in_array($sourceAction, array('ORDER_SUPPLIER_VALIDATE', 'ORDER_SUPPLIER_SUBMIT'), true)) {
+			$this->error = $langs->trans('NotEnoughPermissions');
+			return -1;
+		}
 
 		$cf = new CommandeFournisseur($db);
 		if ($cf->fetch($idOrderSource) <= 0) {
@@ -460,14 +475,14 @@ class TTELink
 		if ($fk_soc > 0) {
 
 			$execution = new InterentitydocumentsSyncContext($db);
-			$result = $execution->run((int) $toEntity, function () use ($db, $cf, $fk_soc, $toEntity, $idOrderSource): int {
+			$result = $execution->run((int) $toEntity, $initiator, function () use ($db, $cf, $fk_soc, $toEntity, $idOrderSource): int {
 				global $conf, $user, $langs;
 				/** @var Conf $conf */
 				/** @var User $user */
 				/** @var Translate $langs */
 
-				if (!isModEnabled('commande') || !$user->hasRight('commande', 'creer')) {
-					$this->error = $langs->trans('NotEnoughPermissions');
+				if (!isModEnabled('commande')) {
+					$this->error = $langs->trans('ErrorModuleNotEnabled', 'commande');
 					return -1;
 				}
 
@@ -634,15 +649,17 @@ class TTELink
 	 * The customer-order validation transaction owns the final commit or rollback.
 	 * @param int $idOrderSource ID de la commande client source
 	 * @param int $toEntity ID de l'entité cible
+	 * @param User|null $initiator User validating the source order
 	 * @return int Positive on success, zero if skipped, negative on failure
 	 */
-	public function cloneSupplierOrderFromCustomerOrder($idOrderSource, $toEntity)
+	public function cloneSupplierOrderFromCustomerOrder($idOrderSource, $toEntity, ?User $initiator = null)
 	{
 		global $db, $conf, $user, $langs;
 		/** @var DoliDB $db */
 		/** @var Conf $conf */
 		/** @var User $user */
 		/** @var Translate $langs */
+		$initiator = $initiator ?? $user;
 
 		$this->error = '';
 		$this->errors = array();
@@ -650,8 +667,12 @@ class TTELink
 			'source_order_id' => (int) $idOrderSource,
 			'source_entity' => 0,
 			'target_entity' => (int) $toEntity,
-			'user_id' => (int) $user->id,
+			'user_id' => (int) $initiator->id,
 		);
+		if ((!getDolGlobalString('MAIN_USE_ADVANCED_PERMS') && !$initiator->hasRight('commande', 'creer'))
+			|| (getDolGlobalString('MAIN_USE_ADVANCED_PERMS') && !$initiator->hasRight('commande', 'order_advance', 'validate'))) {
+			return $this->failSupplierOrderClone('source_permission', -1, $context, $langs->trans('NotEnoughPermissions'));
+		}
 
 		dol_include_once('/commande/class/commande.class.php');
 		dol_include_once('/fourn/class/fournisseur.commande.class.php');
@@ -693,14 +714,13 @@ class TTELink
 		$context['target_soc_id'] = (int) $fk_soc;
 
 		$execution = new InterentitydocumentsSyncContext($db);
-		$result = $execution->run((int) $toEntity, function () use ($db, $order, $fk_soc, $toEntity, $context): int {
+		$result = $execution->run((int) $toEntity, $initiator, function () use ($db, $order, $fk_soc, $toEntity, $context): int {
 			global $conf, $user, $langs;
 			/** @var Conf $conf */
 			/** @var User $user */
 			/** @var Translate $langs */
-			if (!isModEnabled('supplier_order')
-				|| (!$user->hasRight('fournisseur', 'commande', 'creer') && !$user->hasRight('supplier_order', 'creer'))) {
-				return $this->failSupplierOrderClone('destination_permission', -1, $context, $langs->trans('NotEnoughPermissions'));
+			if (!isModEnabled('supplier_order')) {
+				return $this->failSupplierOrderClone('destination_module', -1, $context, $langs->trans('ErrorModuleNotEnabled', 'supplier_order'));
 			}
 			$existingSupplierOrderId = $this->getSupplierOrderIdFromCustomerOrder($order, $toEntity, $fk_soc);
 			if ($existingSupplierOrderId < 0) {
