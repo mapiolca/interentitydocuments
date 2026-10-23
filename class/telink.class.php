@@ -177,26 +177,30 @@ class TTELink
 	/**
 	 * Retourne l'ID du tiers correspondant à l'entité ciblée dans l'entité courante
 	 * @param int $targetEntity
-	 * @param int $currentEntity
-	 * @return int <=0 if KO, >0 if OK
+	 * @param int|false $currentEntity
+	 * @return int Third-party ID, zero if no mapping exists, negative on SQL failure
 	 */
 	public function getSocIdFromEntity($targetEntity, $currentEntity = false)
 	{
 		global $db, $conf, $langs;
+		/** @var DoliDB $db */
+		/** @var Conf $conf */
+		/** @var Translate $langs */
 
 		if (!$currentEntity) {
 			$currentEntity = $conf->entity;
 		}
 
 		$res = $db->query("SELECT fk_soc FROM " . MAIN_DB_PREFIX . "thirdparty_entity WHERE entity=" . intval($currentEntity) . " AND fk_entity=" . intval($targetEntity));
-		if ($res) {
+		if ($res && $res !== true) {
 			if ($db->num_rows($res) > 0) {
 				$obj = $db->fetch_object($res);
-				return $obj->fk_soc;
-			} else {
-				$this->error = $langs->trans('MissingEntityLinkBetweenSoc');
-				return 0;
+				if (is_object($obj) && isset($obj->fk_soc) && is_numeric($obj->fk_soc) && (int) $obj->fk_soc > 0) {
+					return (int) $obj->fk_soc;
+				}
 			}
+			$this->error = $langs->trans('MissingEntityLinkBetweenSoc');
+			return 0;
 		} else {
 			$this->error = $db->lasterror();
 			return -1;
@@ -553,13 +557,27 @@ class TTELink
 
 	/**
 	 * Crée une commande fournisseur dans l'entité cible à partir d'une commande client
+	 * The customer-order validation transaction owns the final commit or rollback.
 	 * @param int $idOrderSource ID de la commande client source
 	 * @param int $toEntity ID de l'entité cible
-	 * @return int >0 if OK, 0 if no action, <0 if KO
+	 * @return int Positive on success, zero if skipped, negative on failure
 	 */
 	public function cloneSupplierOrderFromCustomerOrder($idOrderSource, $toEntity)
 	{
-		global $db, $conf, $user;
+		global $db, $conf, $user, $langs;
+		/** @var DoliDB $db */
+		/** @var Conf $conf */
+		/** @var User $user */
+		/** @var Translate $langs */
+
+		$this->error = '';
+		$this->errors = array();
+		$context = array(
+			'source_order_id' => (int) $idOrderSource,
+			'source_entity' => 0,
+			'target_entity' => (int) $toEntity,
+			'user_id' => (int) $user->id,
+		);
 
 		dol_include_once('/commande/class/commande.class.php');
 		dol_include_once('/fourn/class/fournisseur.commande.class.php');
@@ -567,51 +585,68 @@ class TTELink
 		$order = new Commande($db);
 		$res = $order->fetch($idOrderSource);
 		if ($res <= 0) {
-			$this->error = $order->error;
-			return -1;
+			return $this->failSupplierOrderClone('fetch_source_order', -1, $context, $order->errorsToString());
 		}
+		$context['source_entity'] = (int) $order->entity;
 		$res = $order->fetch_lines();
 		if ($res < 0) {
-			$this->error = $order->error;
-			return -1;
+			return $this->failSupplierOrderClone('fetch_source_lines', -1, $context, $order->errorsToString());
 		}
 
-		if (empty($order->entity)) {
-			$order->entity = (int) $conf->entity;
+		if ($context['source_entity'] <= 0 || $context['target_entity'] <= 0) {
+			return $this->failSupplierOrderClone('check_entities', -1, $context);
 		}
 
 		$linkedFromSupplierOrder = $this->isCustomerOrderCreatedFromSupplierOrder($order->id);
 		if ($linkedFromSupplierOrder < 0) {
-			return -1;
+			return $this->failSupplierOrderClone('origin_lookup', -1, $context, $this->error);
 		}
 		if ($linkedFromSupplierOrder > 0) {
+			dol_syslog(__METHOD__.' action=ORDER_VALIDATE stage=origin_lookup source_order_id='.(int) $order->id.' result=0 reason=already_from_supplier_order', LOG_DEBUG);
 			return 0;
 		}
 
 		// Récupération du tiers correspondant à l'entité source dans l'entité cible.
-		$fk_soc = $this->getSocIdFromEntity($order->entity, $toEntity);
+		$fk_soc = $this->getSocIdFromEntity($context['source_entity'], $context['target_entity']);
 		if ($fk_soc <= 0) {
-			return -1;
+			if ($fk_soc === 0) {
+				$langs->load('interentitydocuments@interentitydocuments');
+				$detail = $langs->trans('InterentitySupplierOrderMissingReverseMapping', (int) $toEntity, (int) $order->entity);
+				return $this->failSupplierOrderClone('reverse_mapping', -1, $context, $detail, 'missing_reverse_mapping');
+			}
+			return $this->failSupplierOrderClone('reverse_mapping', -1, $context, $this->error);
 		}
+		$context['target_soc_id'] = (int) $fk_soc;
 
 		$existingSupplierOrderId = $this->getSupplierOrderIdFromCustomerOrder($order, $toEntity, $fk_soc);
+		if ($existingSupplierOrderId < 0) {
+			return $this->failSupplierOrderClone('existing_order_lookup', -2, $context, $this->error);
+		}
 		if ($existingSupplierOrderId > 0) {
 			$supplierOrder = new CommandeFournisseur($db);
+			$context['supplier_order_id'] = (int) $existingSupplierOrderId;
 
 			$previous_entity = $conf->entity;
 			$conf->entity = $toEntity;
-			if ($supplierOrder->fetch($existingSupplierOrderId) > 0) {
+			$existingOrderStage = 'fetch_existing_order';
+			try {
+				$res = $supplierOrder->fetch($existingSupplierOrderId);
+				if ($res <= 0) {
+					return $this->failSupplierOrderClone('fetch_existing_order', -2, $context, $supplierOrder->errorsToString());
+				}
+				$existingOrderStage = 'delete_existing_order';
+				dol_syslog(__METHOD__.' action=ORDER_VALIDATE stage=delete_existing_order source_order_id='.(int) $order->id.' supplier_order_id='.(int) $existingSupplierOrderId.' target_entity='.(int) $toEntity, LOG_DEBUG);
 				$delRes = $supplierOrder->delete($user);
 				if ($delRes < 0) {
-					$this->error = $supplierOrder->error;
-					$conf->entity = $previous_entity;
-					return -3;
+					return $this->failSupplierOrderClone('delete_existing_order', -3, $context, $supplierOrder->errorsToString());
 				}
-			} else {
+			} catch (Throwable $exception) {
+				$this->failSupplierOrderClone($existingOrderStage.'_exception', -3, $context);
+				dol_syslog(__METHOD__.' exception_type='.get_class($exception).' exception_line='.$exception->getLine(), LOG_ERR);
+				throw $exception;
+			} finally {
 				$conf->entity = $previous_entity;
-				return -2;
 			}
-			$conf->entity = $previous_entity;
 		}
 
 		$supplierOrder = new CommandeFournisseur($db);
@@ -678,19 +713,27 @@ class TTELink
 
 		$previous_entity = $conf->entity;
 		$conf->entity = (int) $toEntity;
-		$orderCreatedRes = $supplierOrder->create($user);
-		$conf->entity = $previous_entity;
+		dol_syslog(__METHOD__.' action=ORDER_VALIDATE stage=create_supplier_order source_order_id='.(int) $order->id.' source_entity='.(int) $order->entity.' target_entity='.(int) $toEntity.' target_soc_id='.(int) $fk_soc.' line_count='.count($supplierOrder->lines).' predefined_prices_only='.getDolGlobalInt('SUPPLIER_ORDER_WITH_PREDEFINED_PRICES_ONLY'), LOG_DEBUG);
+		try {
+			$orderCreatedRes = $supplierOrder->create($user);
+		} catch (Throwable $exception) {
+			$this->failSupplierOrderClone('create_supplier_order_exception', -4, $context);
+			dol_syslog(__METHOD__.' exception_type='.get_class($exception).' exception_line='.$exception->getLine(), LOG_ERR);
+			throw $exception;
+		} finally {
+			$conf->entity = $previous_entity;
+		}
 
-		if ($orderCreatedRes < 0) {
-			$this->error = $supplierOrder->error;
-			return -4;
+		$context['supplier_order_id'] = (int) $supplierOrder->id;
+		$context['native_result'] = (int) $orderCreatedRes;
+		if ($orderCreatedRes <= 0 || (int) $supplierOrder->id <= 0) {
+			return $this->failSupplierOrderClone('create_supplier_order', -4, $context, $supplierOrder->errorsToString());
 		}
 
 		// Transfert de la commande fournisseur dans l'entité cible si la création n'a pas déjà utilisé l'entité cible.
 		$res = $db->query("UPDATE " . MAIN_DB_PREFIX . "commande_fournisseur SET entity=" . intval($toEntity) . " WHERE rowid=" . intval($supplierOrder->id));
 		if (!$res) {
-			$this->error = $db->lasterror();
-			return -5;
+			return $this->failSupplierOrderClone('assign_target_entity', -5, $context, $db->lasterror());
 		}
 
 		// Lien entre la commande client et la commande fournisseur dans la table element_element.
@@ -698,14 +741,46 @@ class TTELink
 		$sql .= intval($order->id) . ", 'commande', " . intval($supplierOrder->id) . ", 'commandefourn')";
 		$res  = $db->query($sql);
 		if (!$res) {
-			$this->error = $db->lasterror();
-			return -6;
+			return $this->failSupplierOrderClone('link_orders', -6, $context, $db->lasterror());
 		}
 
 		$supplierOrder->entity = (int) $toEntity;
-		$this->copySourcePdfToTargetDocuments($order, $supplierOrder, (int) $toEntity, true);
+		$pdfResult = $this->copySourcePdfToTargetDocuments($order, $supplierOrder, (int) $toEntity, true);
+		dol_syslog(__METHOD__.' action=ORDER_VALIDATE stage=clone_returned source_order_id='.(int) $order->id.' supplier_order_id='.(int) $supplierOrder->id.' target_entity='.(int) $toEntity.' result='.(int) $orderCreatedRes.' pdf_result='.(int) $pdfResult.' transaction=caller', LOG_INFO);
 
 		return $orderCreatedRes;
+	}
+
+	/**
+	 * Preserve native errors for the caller and log only technical, non-sensitive context.
+	 *
+	 * @param string $stage Failed synchronization step
+	 * @param int $result Negative return code
+	 * @param array<string, int> $context Object, entity, actor IDs and native return code
+	 * @param string $detail Native error text, returned to Dolibarr but never copied to logs
+	 * @param string $reason Optional module diagnostic code
+	 * @return int Negative return code
+	 */
+	private function failSupplierOrderClone(string $stage, int $result, array $context, string $detail = '', string $reason = ''): int
+	{
+		global $db, $langs;
+		/** @var DoliDB $db */
+		/** @var Translate $langs */
+
+		$dbErrorCode = preg_replace('/[^a-zA-Z0-9_-]/', '', (string) $db->lasterrno());
+		$langs->load('interentitydocuments@interentitydocuments');
+		$this->error = $langs->trans('InterentitySupplierOrderCloneFailed', $context['source_order_id'], $context['source_entity'], $context['target_entity'], $stage);
+		$this->errors = array($this->error);
+		if (trim($detail) !== '') {
+			$this->errors[] = $detail;
+		}
+		$logContext = '';
+		foreach ($context as $key => $value) {
+			$logContext .= ' '.$key.'='.(int) $value;
+		}
+		dol_syslog('interentitydocuments action=ORDER_VALIDATE stage='.$stage.' result='.$result.$logContext.' db_errno='.$dbErrorCode.' native_error_present='.(int) (trim($detail) !== '').($reason !== '' ? ' reason='.$reason : ''), LOG_ERR);
+
+		return $result;
 	}
 
 	/**
@@ -913,7 +988,7 @@ class TTELink
 	 * @param int          $targetEntity Entity that owns the target object
 	 * @param bool         $forceGenerateSourcePdf Legacy flag; generation is only attempted when no readable source PDF exists
 	 * @param string       $preferredSourceFile Already generated source file to copy first
-	 * @return int <0 if copy failed, 0 if no PDF was generated/found, >0 if copied
+	 * @return int Negative if copy failed, zero if no PDF was generated/found, positive if copied
 	 */
 	private function copySourcePdfToTargetDocuments($sourceObject, $targetObject, $targetEntity, $forceGenerateSourcePdf = false, $preferredSourceFile = '')
 	{

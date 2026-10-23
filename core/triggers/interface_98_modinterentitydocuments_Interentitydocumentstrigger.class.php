@@ -164,7 +164,7 @@ class Interfaceinterentitydocumentstrigger
 			// Création automatique de la facture fournisseur dans l'entité de destination
 			return $this->_cloneInvoice($object);
 		}
-		elseif ($action === 'ORDER_VALIDATE' && !empty($conf->global->IED_AUTO_CREATE_SUPPLIER_ORDER_FROM_CUSTOMER_ORDER)) {
+		elseif ($action === 'ORDER_VALIDATE' && getDolGlobalInt('IED_AUTO_CREATE_SUPPLIER_ORDER_FROM_CUSTOMER_ORDER')) {
 			/** @var Commande $object */
 			// Création automatique de la commande fournisseur dans l'entité de destination.
 			return $this->_cloneSupplierOrderFromCustomerOrder($object);
@@ -1393,39 +1393,59 @@ class Interfaceinterentitydocumentstrigger
 	/**
 	 * Crée une commande fournisseur dans l'entité de destination à partir d'une commande client
 	 * @param Commande $object
-	 * @return int <0 if KO, 0 if no action, >0 if OK
+	 * @return int Negative on failure, zero if skipped, positive on success
 	 */
 	private function _cloneSupplierOrderFromCustomerOrder($object)
 	{
-		global $conf;
+		global $conf, $langs;
+		/** @var Conf $conf */
+		/** @var Translate $langs */
 
 		dol_include_once('/interentitydocuments/class/telink.class.php');
 
+		/** @var DoliDB $db */
 		$db =& $this->db;
-		$sourceEntity = !empty($object->entity) ? (int) $object->entity : (int) $conf->entity;
+		$sourceEntity = isset($object->entity) ? (int) $object->entity : 0;
+		$logContext = ' action=ORDER_VALIDATE source_order_id='.(int) $object->id.' source_entity='.$sourceEntity.' current_entity='.(int) $conf->entity.' source_soc_id='.(int) $object->socid;
+		dol_syslog('interentitydocuments stage=begin'.$logContext, LOG_INFO);
+		if ((int) $object->id <= 0 || $sourceEntity <= 0) {
+			$langs->load('interentitydocuments@interentitydocuments');
+			$this->setError($langs->trans('InterentitySupplierOrderCloneFailed', (int) $object->id, $sourceEntity, 0, 'check_entities'));
+			dol_syslog('interentitydocuments stage=check_entities'.$logContext.' result=-1', LOG_ERR);
+			return -1;
+		}
 
 		$res = $db->query("SELECT fk_entity FROM " . MAIN_DB_PREFIX . "thirdparty_entity"
 		                  . " WHERE entity=" . intval($sourceEntity)
 		                  . " AND fk_soc=" . intval($object->socid)
 		                  . ' AND fk_entity <> ' . intval($sourceEntity));
-		if (!$res) {
+		if (!$res || $res === true) {
+			$dbError = $db->lasterror();
+			$dbErrorCode = preg_replace('/[^a-zA-Z0-9_-]/', '', (string) $db->lasterrno());
 			$this->setError('ErrorSQL');
+			$this->errors = array($this->error, $dbError);
+			dol_syslog('interentitydocuments stage=target_mapping'.$logContext.' result=-1 db_errno='.$dbErrorCode, LOG_ERR);
 			return -1;
 		} elseif ($db->num_rows($res) === 0) {
 			// Pas d'entité liée au tiers → rien à faire
+			dol_syslog('interentitydocuments stage=target_mapping'.$logContext.' result=0 reason=no_linked_entity', LOG_DEBUG);
 			return 0;
 		}
 		$obj = $db->fetch_object($res);
 
-		if ($obj->fk_entity > 0) {
+		if (is_object($obj) && isset($obj->fk_entity) && is_numeric($obj->fk_entity) && (int) $obj->fk_entity > 0) {
+			$targetEntity = (int) $obj->fk_entity;
+			dol_syslog('interentitydocuments stage=target_mapping'.$logContext.' target_entity='.$targetEntity, LOG_DEBUG);
 			$TTELink = new TTELink();
-			$res = $TTELink->cloneSupplierOrderFromCustomerOrder($object->id, $obj->fk_entity);
+			$res = $TTELink->cloneSupplierOrderFromCustomerOrder($object->id, $targetEntity);
 			if ($res < 0) {
-				$this->setError($TTELink->error);
+				$this->error = $TTELink->error;
+				$this->errors = $TTELink->errors;
 			}
 			return $res;
 		} else {
 			$this->setError('MissingEntityLink');
+			dol_syslog('interentitydocuments stage=target_mapping'.$logContext.' result=-1 reason=invalid_target_entity', LOG_ERR);
 			return -1;
 		}
 	}
