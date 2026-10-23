@@ -54,7 +54,7 @@ class modinterentitydocuments extends DolibarrModules
         $this->name = preg_replace('/^mod/i', '', get_class($this));
         $this->description = "Create linked documents between Multicompany entities";
         // Possible values for version are: 'development', 'experimental' or version
-        $this->version = '1.0.1';
+        $this->version = '1.0.2';
         // Key used in the Dolibarr constants table to save module status enabled/disabled
         // (where MYMODULE is value of property name of module in uppercase)
         $this->const_name = 'MAIN_MODULE_' . strtoupper($this->name);
