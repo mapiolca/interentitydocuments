@@ -703,7 +703,11 @@ class Interfaceinterentitydocumentstrigger
 				continue;
 			}
 
-			$targetEntity = !empty($supplierInvoice->entity) ? (int) $supplierInvoice->entity : (int) $conf->entity;
+			$targetEntity = (int) $supplierInvoice->entity;
+			if ($targetEntity <= 0) {
+				$this->setError('InterentitySupplierPaymentMirrorMissingInvoice');
+				return -1;
+			}
 			$targetSocid = !empty($supplierInvoice->socid) ? (int) $supplierInvoice->socid : 0;
 			if ($targetSocid <= 0) {
 				$this->setError('InterentitySupplierPaymentMirrorMissingThirdparty');
@@ -809,12 +813,21 @@ class Interfaceinterentitydocumentstrigger
 
 		$langs->load('interentitydocuments@interentitydocuments');
 
-		$previousEntity = (int) $conf->entity;
 		$targetEntity = (int) $group['entity'];
-		$conf->entity = $targetEntity;
-
-		try {
-			$bankAccountId = $this->getSupplierPaymentBankAccountIdForEntity($targetEntity);
+		require_once __DIR__.'/../../class/interentitydocumentssynccontext.class.php';
+		/** @var DoliDB $db */
+		$db = $this->db;
+		$execution = new InterentitydocumentsSyncContext($db);
+		$result = $execution->run($targetEntity, function () use ($customerPayment, $group): int {
+			global $conf, $user, $langs;
+			/** @var Conf $conf */
+			/** @var User $user */
+			/** @var Translate $langs */
+			if (!isModEnabled('supplier_invoice') || (!$user->hasRight('fournisseur', 'facture', 'creer') && !$user->hasRight('supplier_invoice', 'creer'))) {
+				$this->setError('NotEnoughPermissions');
+				return -1;
+			}
+			$bankAccountId = getDolGlobalInt('IED_SUPPLIER_PAYMENT_BANK_ACCOUNT_ID');
 
 			$supplierPayment = new PaiementFourn($this->db);
 			$supplierPayment->datepaye = $this->getPaymentDate($customerPayment);
@@ -845,18 +858,20 @@ class Interfaceinterentitydocumentstrigger
 				return -1;
 			}
 
-			$bankEnabled = function_exists('isModEnabled') ? isModEnabled('bank') : !empty($conf->bank->enabled);
+			$bankEnabled = isModEnabled('bank');
 			if ($bankAccountId > 0 && $bankEnabled) {
 				$bankResult = $supplierPayment->addPaymentToBank($user, 'payment_supplier', '(SupplierInvoicePayment)', $bankAccountId, '', '');
 				if ($bankResult < 0) {
-					dol_syslog('interentitydocuments: failed to add mirrored supplier payment '.$supplierPayment->id.' to bank account '.$bankAccountId.': '.$supplierPayment->error, LOG_WARNING);
+					$this->setError($supplierPayment->error !== '' ? $supplierPayment->error : 'InterentitySupplierPaymentMirrorFailed');
+					return -1;
 				}
 			}
-		} finally {
-			$conf->entity = $previousEntity;
+			return 1;
+		});
+		if ($execution->error !== '') {
+			$this->setError($execution->error);
 		}
-
-		return 1;
+		return $result;
 	}
 
 	/**
@@ -1015,7 +1030,11 @@ class Interfaceinterentitydocumentstrigger
 				continue;
 			}
 
-			$targetEntity = !empty($customerInvoice->entity) ? (int) $customerInvoice->entity : (int) $conf->entity;
+			$targetEntity = (int) $customerInvoice->entity;
+			if ($targetEntity <= 0) {
+				$this->setError('InterentityCustomerPaymentMirrorMissingInvoice');
+				return -1;
+			}
 			$targetSocid = !empty($customerInvoice->socid) ? (int) $customerInvoice->socid : 0;
 			if ($targetSocid <= 0) {
 				$this->setError('InterentityCustomerPaymentMirrorMissingThirdparty');
@@ -1121,12 +1140,21 @@ class Interfaceinterentitydocumentstrigger
 
 		$langs->load('interentitydocuments@interentitydocuments');
 
-		$previousEntity = (int) $conf->entity;
 		$targetEntity = (int) $group['entity'];
-		$conf->entity = $targetEntity;
-
-		try {
-			$bankAccountId = $this->getCustomerPaymentBankAccountIdForEntity($targetEntity);
+		require_once __DIR__.'/../../class/interentitydocumentssynccontext.class.php';
+		/** @var DoliDB $db */
+		$db = $this->db;
+		$execution = new InterentitydocumentsSyncContext($db);
+		$result = $execution->run($targetEntity, function () use ($supplierPayment, $group): int {
+			global $conf, $user, $langs;
+			/** @var Conf $conf */
+			/** @var User $user */
+			/** @var Translate $langs */
+			if (!isModEnabled('facture') || !$user->hasRight('facture', 'paiement')) {
+				$this->setError('NotEnoughPermissions');
+				return -1;
+			}
+			$bankAccountId = getDolGlobalInt('IED_CUSTOMER_PAYMENT_BANK_ACCOUNT_ID');
 
 			$customerPayment = new Paiement($this->db);
 			$customerPayment->datepaye = $this->getPaymentDate($supplierPayment);
@@ -1156,18 +1184,20 @@ class Interfaceinterentitydocumentstrigger
 				return -1;
 			}
 
-			$bankEnabled = function_exists('isModEnabled') ? isModEnabled('bank') : !empty($conf->bank->enabled);
+			$bankEnabled = isModEnabled('bank');
 			if ($bankAccountId > 0 && $bankEnabled) {
 				$bankResult = $customerPayment->addPaymentToBank($user, 'payment', '(CustomerInvoicePayment)', $bankAccountId, '', '');
 				if ($bankResult < 0) {
-					dol_syslog('interentitydocuments: failed to add mirrored customer payment '.$customerPayment->id.' to bank account '.$bankAccountId.': '.$customerPayment->error, LOG_WARNING);
+					$this->setError($customerPayment->error !== '' ? $customerPayment->error : 'InterentityCustomerPaymentMirrorFailed');
+					return -1;
 				}
 			}
-		} finally {
-			$conf->entity = $previousEntity;
+			return 1;
+		});
+		if ($execution->error !== '') {
+			$this->setError($execution->error);
 		}
-
-		return 1;
+		return $result;
 	}
 
 	/**
@@ -1246,56 +1276,6 @@ class Interfaceinterentitydocumentstrigger
 		}
 
 		return 1;
-	}
-
-	/**
-	 * Return configured customer payment bank account for an entity.
-	 *
-	 * @param int $entity Entity id
-	 * @return int
-	 */
-	private function getCustomerPaymentBankAccountIdForEntity($entity)
-	{
-		return $this->getIntegerConstantForEntity('IED_CUSTOMER_PAYMENT_BANK_ACCOUNT_ID', $entity);
-	}
-
-	/**
-	 * Return configured supplier payment bank account for an entity.
-	 *
-	 * @param int $entity Entity id
-	 * @return int
-	 */
-	private function getSupplierPaymentBankAccountIdForEntity($entity)
-	{
-		return $this->getIntegerConstantForEntity('IED_SUPPLIER_PAYMENT_BANK_ACCOUNT_ID', $entity);
-	}
-
-	/**
-	 * Return an integer constant value for an entity.
-	 *
-	 * @param string $name   Constant name
-	 * @param int    $entity Entity id
-	 * @return int
-	 */
-	private function getIntegerConstantForEntity($name, $entity)
-	{
-		$sql = 'SELECT value';
-		$sql .= ' FROM '.MAIN_DB_PREFIX.'const';
-		$sql .= " WHERE name = '".$this->db->escape($name)."'";
-		$sql .= ' AND entity = '.((int) $entity);
-		$sql .= ' LIMIT 1';
-
-		$resql = $this->db->query($sql);
-		if (!$resql) {
-			dol_syslog('interentitydocuments: unable to read constant '.$name.' for entity '.$entity.': '.$this->db->lasterror(), LOG_WARNING);
-			return 0;
-		}
-		if ($this->db->num_rows($resql) <= 0) {
-			return 0;
-		}
-
-		$obj = $this->db->fetch_object($resql);
-		return !empty($obj->value) ? (int) $obj->value : 0;
 	}
 
 	/**
@@ -1459,23 +1439,32 @@ class Interfaceinterentitydocumentstrigger
 
 		$db =& $this->db;
 
+		$sourceEntity = (int) $object->entity;
+		if ($sourceEntity <= 0) {
+			$this->setError('InterentitySyncInvalidSourceEntity');
+			return -1;
+		}
+
 		$res = $db->query("SELECT fk_entity FROM " . MAIN_DB_PREFIX . "thirdparty_entity"
-		                  . " WHERE entity=" . $conf->entity
+		                  . " WHERE entity=" . $sourceEntity
 		                  . " AND fk_soc=" . $object->socid
-		                  . ' AND fk_entity <> ' . $conf->entity);
-		if (!$res) {
+		                  . ' AND fk_entity <> ' . $sourceEntity);
+		if (!$res || $res === true) {
 			// SQL ERROR, should not happen.
 			$this->setError('ErrorSQL');
+			return -1;
 		} elseif ($db->num_rows($res) === 0) {
 			// No entity linked to the third party → do nothing
 			return 0;
 		}
 		$obj = $db->fetch_object($res);
 
-		if ($obj->fk_entity > 0) {
+		if (is_object($obj) && isset($obj->fk_entity) && (int) $obj->fk_entity > 0) {
 			$TTELink = new TTELink();
 			$res = $TTELink->cloneOrder($object->id, $obj->fk_entity);
-			$this->setError($TTELink->error);
+			if ($res < 0) {
+				$this->setError($TTELink->error);
+			}
 			return $res;
 		} else {
 			$this->setError('MissingEntityLink');
@@ -1496,11 +1485,17 @@ class Interfaceinterentitydocumentstrigger
 
 		$db =& $this->db;
 
+		$sourceEntity = (int) $object->entity;
+		if ($sourceEntity <= 0) {
+			$this->setError('InterentitySyncInvalidSourceEntity');
+			return -1;
+		}
+
 		$res = $db->query("SELECT fk_entity FROM " . MAIN_DB_PREFIX . "thirdparty_entity"
-		                  . " WHERE entity=" . intval($conf->entity)
+		                  . " WHERE entity=" . $sourceEntity
 		                  . " AND fk_soc=" . intval($object->socid)
-		                  . ' AND fk_entity <> ' . intval($conf->entity));
-		if (!$res) {
+		                  . ' AND fk_entity <> ' . $sourceEntity);
+		if (!$res || $res === true) {
 			$this->setError('ErrorSQL');
 			return -1;
 		} elseif ($db->num_rows($res) === 0) {
@@ -1509,7 +1504,7 @@ class Interfaceinterentitydocumentstrigger
 		}
 		$obj = $db->fetch_object($res);
 
-		if ($obj->fk_entity > 0) {
+		if (is_object($obj) && isset($obj->fk_entity) && (int) $obj->fk_entity > 0) {
 			$TTELink = new TTELink();
 			$res = $TTELink->cloneInvoice($object->id, $obj->fk_entity);
 			if ($res < 0) {

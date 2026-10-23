@@ -46,6 +46,68 @@ function getDolGlobalString($key, $default = '')
 	return isset($GLOBALS['conf']->global->{$key}) ? (string) $GLOBALS['conf']->global->{$key} : $default;
 }
 
+function isModEnabled($module)
+{
+	return !in_array($module, $GLOBALS['db']->disabledModules, true);
+}
+
+/** Native configuration/user contracts are simulated; no account is changed. */
+class IedTestConf extends stdClass
+{
+	public function setValues($db)
+	{
+		$this->global = clone $this->global;
+		$this->global->IED_SYNC_USER_ID = $db->syncActorId;
+		$this->global->IED_CUSTOMER_PAYMENT_BANK_ACCOUNT_ID = $db->bankAccountId ?? 0;
+		$this->global->IED_SUPPLIER_PAYMENT_BANK_ACCOUNT_ID = $db->bankAccountId ?? 0;
+		$GLOBALS['mc'] = new IedTestMc();
+		$GLOBALS['mc']->setValues($this);
+		if ($db->changeTimezone) { date_default_timezone_set('UTC'); }
+		return $db->configResult;
+	}
+}
+
+class IedTestMc
+{
+	public $entity = 1;
+	public function setValues($conf) { $this->entity = $conf->entity; }
+}
+class ExtraFields
+{
+	public function __construct($db) {}
+}
+
+class IedTestCompany
+{
+	public $entity = 1;
+	public function setMysoc($conf) { $this->entity = $conf->entity; }
+}
+
+class User extends stdClass
+{
+	public $id = 7;
+	public $statut = 1;
+	public $socid = 0;
+	private $db;
+	private $entity = 1;
+
+	public function __construct($db) { $this->db = $db; }
+	public function fetch($id, $login = '', $sid = '', $personal = 0, $entity = -1)
+	{
+		$this->id = $id;
+		$this->entity = $entity < 0 ? $GLOBALS['conf']->entity : $entity;
+		$this->statut = $this->db->actorActive ? 1 : 0;
+		$this->socid = $this->db->actorExternal ? 10 : 0;
+		return $this->db->actorExists && ($id !== 7 || !$this->db->sourceRestricted) ? 1 : 0;
+	}
+	public function loadRights($tag = '', $reload = 0) { $this->db->rightsLoads++; }
+	public function hasRight(...$permission)
+	{
+		if ($this->db->denyDeleteRight && in_array('supprimer', $permission, true)) { return false; }
+		return !($this->entity === 2 && ($this->db->denyActorRights || ($this->id === 7 && $this->db->sourceRestricted)));
+	}
+}
+
 /** Only the error contract of CommonObject is simulated. */
 class CommonObject extends stdClass
 {
@@ -60,6 +122,8 @@ class CommonObject extends stdClass
 		$this->db = $db;
 	}
 
+	public function liste_contact($status, $source) { return array(); }
+
 	public function errorsToString()
 	{
 		return $this->error.($this->errors ? ($this->error !== '' ? ', ' : '').implode(', ', $this->errors) : '');
@@ -68,6 +132,13 @@ class CommonObject extends stdClass
 
 class Commande extends CommonObject
 {
+	public function create($user)
+	{
+		$this->db->creationActors[] = array($user->id, $GLOBALS['user']->id, $GLOBALS['conf']->entity);
+		$this->id = 99;
+		return 99;
+	}
+
 	public function generateDocument($model, $outputlangs)
 	{
 		$this->db->pdfGenerations++;
@@ -95,6 +166,11 @@ class CommandeFournisseur extends CommonObject
 	public function fetch($id)
 	{
 		$this->id = $id;
+		$this->ref = 'SO-TEST';
+		$this->socid = 10;
+		$this->entity = 1;
+		$this->fk_project = 0;
+		$this->lines = array();
 		return 1;
 	}
 
@@ -110,6 +186,9 @@ class CommandeFournisseur extends CommonObject
 	public function create($user)
 	{
 		$this->db->creates++;
+		$this->db->creationActors[] = array($user->id, $GLOBALS['user']->id, $GLOBALS['conf']->entity);
+		$this->db->createdCompanyEntity = $GLOBALS['mysoc']->entity;
+		$this->db->createdMcEntity = $GLOBALS['mc']->entity;
 		if ($this->db->throwOnCreate) {
 			throw new RuntimeException('Sensitive exception content');
 		}
@@ -125,6 +204,20 @@ class CommandeFournisseurLigne extends CommonObject
 
 class IedTestDb
 {
+	public $syncActorId = 0;
+	public $sourceRestricted = false;
+	public $actorExists = true;
+	public $actorActive = true;
+	public $actorExternal = false;
+	public $denyActorRights = false;
+	public $denyDeleteRight = false;
+	public $configResult = 0;
+	public $changeTimezone = false;
+	public $createdCompanyEntity = 0;
+	public $createdMcEntity = 0;
+	public $rightsLoads = 0;
+	public $creationActors = array();
+	public $disabledModules = array();
 	public $failStage = '';
 	public $reverseMapping = true;
 	public $targetMapping = true;
@@ -234,8 +327,12 @@ function resetScenario()
 {
 	$GLOBALS['iedTestLogs'] = array();
 	$GLOBALS['db'] = new IedTestDb();
-	$GLOBALS['conf'] = (object) array('entity' => 1, 'global' => (object) array('IED_AUTO_CREATE_SUPPLIER_ORDER_FROM_CUSTOMER_ORDER' => 1));
-	$GLOBALS['user'] = (object) array('id' => 7);
+	$GLOBALS['conf'] = new IedTestConf();
+	$GLOBALS['conf']->entity = 1;
+	$GLOBALS['conf']->global = (object) array('IED_AUTO_CREATE_SUPPLIER_ORDER_FROM_CUSTOMER_ORDER' => 1);
+	$GLOBALS['user'] = new User($GLOBALS['db']);
+	$GLOBALS['mysoc'] = new IedTestCompany();
+	$GLOBALS['mc'] = new IedTestMc();
 	$GLOBALS['langs'] = new IedTestTranslate();
 	$GLOBALS['langs']->load('interentitydocuments@interentitydocuments');
 }
@@ -251,6 +348,74 @@ function runValidationTrigger()
 }
 
 $scenarios = array(
+	'restricted source actor uses the configured destination actor' => static function () {
+		$db = $GLOBALS['db'];
+		$db->sourceRestricted = true;
+		$db->syncActorId = 70;
+		$originalUser = $GLOBALS['user'];
+		$originalConf = $GLOBALS['conf'];
+		list($result) = runValidationTrigger();
+		check($result === 99, 'An authorized automatic creation failed');
+		check($db->creationActors === array(array(70, 70, 2)), 'The native call did not receive the destination actor/context');
+		check($GLOBALS['user'] === $originalUser && $GLOBALS['conf'] === $originalConf, 'Caller identity/configuration changed');
+		check($db->rightsLoads === 1, 'Destination rights were not loaded');
+	},
+	'restricted source without a configured actor fails before writing' => static function () {
+		$GLOBALS['db']->sourceRestricted = true;
+		list($result) = runValidationTrigger();
+		check($result < 0 && $GLOBALS['db']->creates === 0, 'An unavailable actor caused a write');
+	},
+	'destination rights are never fabricated' => static function () {
+		$GLOBALS['db']->syncActorId = 70;
+		$GLOBALS['db']->denyActorRights = true;
+		list($result) = runValidationTrigger();
+		check($result < 0 && $GLOBALS['db']->creates === 0, 'A missing destination right was bypassed');
+	},
+	'disabled destination module prevents automatic creation' => static function () {
+		$GLOBALS['db']->disabledModules = array('supplier_order', 'fournisseur');
+		list($result) = runValidationTrigger();
+		check($result < 0 && $GLOBALS['db']->creates === 0, 'Disabled destination modules were bypassed');
+	},
+	'recreating a counterpart requires the execution user deletion right' => static function () {
+		$GLOBALS['db']->syncActorId = 70;
+		$GLOBALS['db']->existingSupplierOrder = 88;
+		$GLOBALS['db']->denyDeleteRight = true;
+		list($result) = runValidationTrigger();
+		check($result < 0 && $GLOBALS['db']->deletes === 0 && $GLOBALS['db']->creates === 0, 'A missing deletion right was bypassed');
+	},
+
+	'destination configuration failure restores original objects' => static function () {
+		$GLOBALS['db']->configResult = -1;
+		$originalConf = $GLOBALS['conf'];
+		$originalUser = $GLOBALS['user'];
+		list($result) = runValidationTrigger();
+		check($result < 0 && $GLOBALS['db']->creates === 0, 'Configuration failure caused a write');
+		check($GLOBALS['conf'] === $originalConf && $GLOBALS['user'] === $originalUser, 'Configuration failure leaked context');
+	},
+
+	'destination company and Multicompany context are used then restored' => static function () {
+		$originalMc = $GLOBALS['mc'];
+		$originalCompany = $GLOBALS['mysoc'];
+		list($result) = runValidationTrigger();
+		check($result === 99 && $GLOBALS['db']->createdCompanyEntity === 2 && $GLOBALS['db']->createdMcEntity === 2, 'Native target context was not loaded');
+		check($GLOBALS['mc'] === $originalMc && $GLOBALS['mc']->entity === 1 && $GLOBALS['mysoc'] === $originalCompany, 'Source company/Multicompany context was changed');
+	},
+	'native exception restores timezone and extrafield cache' => static function () {
+		$initialTimezone = date_default_timezone_get();
+		date_default_timezone_set('Europe/Paris');
+		$GLOBALS['extrafields'] = new ExtraFields($GLOBALS['db']);
+		$originalExtrafields = $GLOBALS['extrafields'];
+		$GLOBALS['db']->changeTimezone = true;
+		$GLOBALS['db']->throwOnCreate = true;
+		try {
+			try { runValidationTrigger(); } catch (RuntimeException $exception) {}
+			check(date_default_timezone_get() === 'Europe/Paris' && $GLOBALS['extrafields'] === $originalExtrafields, 'Native target configuration leaked');
+		} finally {
+			date_default_timezone_set($initialTimezone);
+			unset($GLOBALS['extrafields']);
+		}
+	},
+
 	'failed lookup must stop before creating or deleting' => static function () {
 		$GLOBALS['db']->failStage = 'existing_order_lookup';
 		list($result) = runValidationTrigger();
@@ -365,6 +530,15 @@ foreach (array('target_mapping', 'origin_lookup', 'reverse_mapping', 'assign_tar
 	};
 }
 
+foreach (array('actorExists', 'actorActive', 'actorExternal') as $property) {
+	$scenarios['invalid destination actor: '.$property] = static function () use ($property) {
+		$GLOBALS['db']->syncActorId = 70;
+		$GLOBALS['db']->{$property} = $property === 'actorExternal';
+		list($result) = runValidationTrigger();
+		check($result < 0 && $GLOBALS['db']->creates === 0, 'An invalid destination actor was used');
+	};
+}
+
 $failures = 0;
 foreach ($scenarios as $name => $scenario) {
 	resetScenario();
@@ -377,4 +551,6 @@ foreach ($scenarios as $name => $scenario) {
 	}
 }
 fwrite(STDOUT, count($scenarios).' scenarios, '.$failures." failure(s).\n");
-exit($failures ? 1 : 0);
+if (!defined('IED_TEST_CONTINUE')) {
+	exit($failures ? 1 : 0);
+}

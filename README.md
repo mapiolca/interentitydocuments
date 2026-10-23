@@ -10,7 +10,7 @@ Fonctionnalités principales :
 - recopie du PDF du document source dans le dossier documentaire `DOL_DATA_ROOT[/entity]/facture|commande/{ref}` de l'objet créé dans l'entité de destination ;
 - synchronisation optionnelle de lignes, statuts et réceptions selon la configuration du module.
 
-Compatibilité cible : Dolibarr v20+ et PHP 8.0+.
+Compatibilité cible : Dolibarr v20 à v25 incluses et PHP 8.0+. Voir les vérifications et limites dans `test/README.md`.
 
 ## Configuration
 
@@ -52,6 +52,25 @@ php test/order_validation.php /chemin/vers/dolibarr/htdocs
 ```
 
 Ces scénarios vérifient la propagation des erreurs, l'arrêt après échec de recherche, la restauration de l'entité, les abstentions et le parcours réussi. Ils ne remplacent pas un essai sur une instance Dolibarr/Multicompany avec deux entités et vérification du commit ou rollback final.
+
+## Synchronisations sans accès à l’entité destinataire
+
+Dans **chaque entité destinataire**, sélectionner dans les réglages du module un **Utilisateur d’exécution des synchronisations reçues** (`IED_SYNC_USER_ID`). Utiliser un compte interne actif appartenant à cette entité, ou un compte global autorisé. Lui attribuer les droits natifs nécessaires :
+
+- création de commandes clients pour recevoir une commande fournisseur ;
+- création de commandes fournisseurs pour recevoir une commande client ;
+- création de factures fournisseurs pour recevoir une facture client et pour recevoir un règlement fournisseur miroir ;
+- enregistrement des règlements clients pour recevoir un règlement client miroir.
+
+Les commandes et factures créées restent des brouillons selon le comportement existant. Le remplacement d’une contrepartie existante exige aussi son droit de suppression. Les traitements supplémentaires des modules actifs restent soumis aux droits et aux règles de cet utilisateur, notamment une éventuelle approbation. Le module ne lui attribue aucun droit et ne désactive aucun trigger.
+
+L’utilisateur source effectue uniquement l’opération qu’il est autorisé à réaliser dans son entité. L’automatisme utilise ensuite l’utilisateur configuré dans la destination, y compris pour les appels natifs et la banque. L’utilisateur source ne reçoit aucun accès supplémentaire à cette entité. Sans utilisateur d’exécution configuré, le compte source doit être utilisable dans la destination avec les droits nécessaires.
+
+La configuration, les répertoires documentaires natifs, la société émettrice et les droits sont rechargés pour la destination. Le contexte source est restauré après le traitement, y compris après une exception. Le journal technique conserve les identifiants de l’utilisateur source et de l’utilisateur d’exécution ; les objets créés portent l’auteur d’exécution natif.
+
+Les flux existants et leurs options d’activation sont conservés. Aucun flux facture fournisseur vers facture client n’est ajouté. Une erreur d’un traitement obligatoire est remontée à la transaction source. Une erreur bancaire ne devient pas un succès de synchronisation.
+
+La copie du PDF des documents créés attend la génération native de la source et le hook `afterPDFCreation`, afin de ne pas perturber le renommage du PDF provisoire et de son entrée ECM pendant la validation.
 
 ## Diagnostic AGENT.md
 

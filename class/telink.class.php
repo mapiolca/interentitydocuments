@@ -5,6 +5,8 @@
  *
  */
 
+require_once __DIR__.'/interentitydocumentssynccontext.class.php';
+
 class TTELink
 {
 	/** @var int $rowid Primary key */
@@ -267,98 +269,133 @@ class TTELink
 	public function cloneInvoice($idInvoiceSource, $toEntity)
 	{
 		global $db, $conf, $user, $langs;
+		/** @var DoliDB $db */
+		/** @var Conf $conf */
+		/** @var User $user */
+		/** @var Translate $langs */
 
 		dol_include_once('/compta/facture/class/facture.class.php');
 		dol_include_once('/fourn/class/fournisseur.facture.class.php');
 
 		$facture = new Facture($db);
-		$facture->fetch($idInvoiceSource);
-		$facture->fetch_lines();
+		if ($facture->fetch($idInvoiceSource) <= 0 || $facture->fetch_lines() < 0) {
+			$this->error = $facture->errorsToString();
+			return -1;
+		}
 
 		// Récupération du tiers correspondant à l'entité source dans l'entité cible (le fournisseur côté entité cible)
-		$fk_soc = $this->getSocIdFromEntity($conf->entity, $toEntity);
+		if ((int) $facture->entity <= 0) {
+			$this->error = $langs->trans('InterentitySyncInvalidSourceEntity');
+			return -1;
+		}
+		$fk_soc = $this->getSocIdFromEntity((int) $facture->entity, $toEntity);
 		if ($fk_soc <= 0) {
 			return -1;
 		}
 
 		// Vérifier si une facture fournisseur existe déjà pour cette facture client
 		$existingInvoiceId = $this->getSupplierInvoiceIdFromInvoice($facture, $toEntity);
-		if ($existingInvoiceId > 0) {
-			// La facture existe déjà dans le système en face. On la supprime pour la recréer
-			$fi = new FactureFournisseur($db);
+		if ($existingInvoiceId < 0) {
+			return -1;
+		}
+		$execution = new InterentitydocumentsSyncContext($db);
+		$result = $execution->run((int) $toEntity, function () use ($db, $facture, $fk_soc, $existingInvoiceId, $toEntity, $idInvoiceSource): int {
+			global $conf, $user, $langs;
+			/** @var Conf $conf */
+			/** @var User $user */
+			/** @var Translate $langs */
+			if (!isModEnabled('supplier_invoice')) {
+				$this->error = $langs->trans('ErrorModuleNotEnabled', 'supplier_invoice');
+				return -1;
+			}
+			if (!$user->hasRight('fournisseur', 'facture', 'creer') && !$user->hasRight('supplier_invoice', 'creer')) {
+				$this->error = $langs->trans('NotEnoughPermissions');
+				return -1;
+			}
+			if ($existingInvoiceId > 0) {
+				if (!$user->hasRight('fournisseur', 'facture', 'supprimer') && !$user->hasRight('supplier_invoice', 'supprimer')) {
+					$this->error = $langs->trans('NotEnoughPermissions');
+					return -1;
+				}
+				// La facture existe déjà dans le système en face. On la supprime pour la recréer
+				$fi = new FactureFournisseur($db);
 
-			$previous_entity = $conf->entity;
-			$conf->entity = $toEntity;
-			if ($fi->fetch($existingInvoiceId) > 0) {
-				$delRes = $fi->delete($user);
-				if ($delRes < 0) {
-					$this->error = $fi->error;
+				$previous_entity = $conf->entity;
+				$conf->entity = $toEntity;
+				if ($fi->fetch($existingInvoiceId) > 0) {
+					$delRes = $fi->delete($user);
+					if ($delRes < 0) {
+						$this->error = $fi->errorsToString();
+						$conf->entity = $previous_entity;
+						return -3;
+					}
+				} else {
 					$conf->entity = $previous_entity;
-					return -3;
+					return -2;
 				}
-			} else {
 				$conf->entity = $previous_entity;
-				return -2;
 			}
-			$conf->entity = $previous_entity;
-		}
 
-		$fi = new FactureFournisseur($db);
-		$fi->type = FactureFournisseur::TYPE_STANDARD;
-		$fi->date = $facture->date;
-		$fi->ref_supplier = $facture->ref;
-		$fi->socid = $fk_soc;
-		$fi->libelle = $facture->ref;
-		$fi->fk_project = $facture->fk_project;
-		$fi->note_public = $facture->note_public;
-		$fi->note_private = $facture->note_private;
-		$fi->cond_reglement_id = $facture->cond_reglement_id;
-		$fi->mode_reglement_id = $facture->mode_reglement_id;
-		$fi->lines = array();
+			$fi = new FactureFournisseur($db);
+			$fi->type = FactureFournisseur::TYPE_STANDARD;
+			$fi->date = $facture->date;
+			$fi->ref_supplier = $facture->ref;
+			$fi->socid = $fk_soc;
+			$fi->libelle = $facture->ref;
+			$fi->fk_project = $facture->fk_project;
+			$fi->note_public = $facture->note_public;
+			$fi->note_private = $facture->note_private;
+			$fi->cond_reglement_id = $facture->cond_reglement_id;
+			$fi->mode_reglement_id = $facture->mode_reglement_id;
+			$fi->lines = array();
 
-		foreach ($facture->lines as $line) {
-			$lineInvoice = new SupplierInvoiceLine($db);
+			foreach ($facture->lines as $line) {
+				$lineInvoice = new SupplierInvoiceLine($db);
 
-			$TPropertiesToClone = array('desc', 'qty', 'tva_tx', 'vat_src_code', 'localtax1_tx', 'localtax2_tx', 'fk_product', 'remise_percent', 'info_bits', 'date_start', 'date_end', 'product_type', 'rang', 'special_code', 'fk_parent_line', 'label', 'array_options', 'fk_unit');
+				$TPropertiesToClone = array('desc', 'qty', 'tva_tx', 'vat_src_code', 'localtax1_tx', 'localtax2_tx', 'fk_product', 'remise_percent', 'info_bits', 'date_start', 'date_end', 'product_type', 'rang', 'special_code', 'fk_parent_line', 'label', 'array_options', 'fk_unit');
 
-			foreach ($TPropertiesToClone as $property) {
-				if (isset($line->{$property})) {
-					$lineInvoice->{$property} = $line->{$property};
+				foreach ($TPropertiesToClone as $property) {
+					if (isset($line->{$property})) {
+						$lineInvoice->{$property} = $line->{$property};
+					}
 				}
+
+				// Le prix unitaire de la facture client devient le prix unitaire de la facture fournisseur
+				$lineInvoice->pu_ht    = $line->subprice;
+				$lineInvoice->subprice = $line->subprice;
+
+				$fi->lines[] = $lineInvoice;
 			}
 
-			// Le prix unitaire de la facture client devient le prix unitaire de la facture fournisseur
-			$lineInvoice->pu_ht    = $line->subprice;
-			$lineInvoice->subprice = $line->subprice;
+			$invoiceCreatedRes = $fi->create($user);
 
-			$fi->lines[] = $lineInvoice;
+			if ($invoiceCreatedRes <= 0 || (int) $fi->id <= 0) {
+				$this->error = $fi->errorsToString();
+				return -4;
+			}
+
+			// Transfert de la facture fournisseur dans l'entité cible
+			$res = $db->query("UPDATE " . MAIN_DB_PREFIX . "facture_fourn SET entity=" . intval($toEntity) . " WHERE rowid=" . intval($fi->id));
+			if (!$res) {
+				return -5;
+			}
+
+			// Lien entre la facture client et la facture fournisseur dans la table element_element
+			$sql  = "INSERT INTO " . MAIN_DB_PREFIX . "element_element (fk_source, sourcetype, fk_target, targettype) VALUES (";
+			$sql .= intval($idInvoiceSource) . ", 'facture', " . intval($fi->id) . ", 'invoice_supplier')";
+			$res  = $db->query($sql);
+			if (!$res) {
+				return -6;
+			}
+
+			$fi->entity = (int) $toEntity;
+
+			return (int) $invoiceCreatedRes;
+		});
+		if ($execution->error !== '') {
+			$this->error = $execution->error;
 		}
-
-		$invoiceCreatedRes = $fi->create($user);
-
-		if ($invoiceCreatedRes < 0) {
-			$this->error = $fi->error;
-			return -4;
-		}
-
-		// Transfert de la facture fournisseur dans l'entité cible
-		$res = $db->query("UPDATE " . MAIN_DB_PREFIX . "facture_fourn SET entity=" . intval($toEntity) . " WHERE rowid=" . intval($fi->id));
-		if (!$res) {
-			return -5;
-		}
-
-		// Lien entre la facture client et la facture fournisseur dans la table element_element
-		$sql  = "INSERT INTO " . MAIN_DB_PREFIX . "element_element (fk_source, sourcetype, fk_target, targettype) VALUES (";
-		$sql .= intval($idInvoiceSource) . ", 'facture', " . intval($fi->id) . ", 'invoice_supplier')";
-		$res  = $db->query($sql);
-		if (!$res) {
-			return -6;
-		}
-
-		$fi->entity = (int) $toEntity;
-		$this->copySourcePdfToTargetDocuments($facture, $fi, (int) $toEntity, true);
-
-		return $invoiceCreatedRes;
+		return $result;
 	}
 
 	/**
@@ -369,7 +406,10 @@ class TTELink
 	 */
 	public function getSupplierInvoiceIdFromInvoice($invoice, $targetEntity)
 	{
-		$targetSocid = $this->getSocIdFromEntity($targetEntity, $invoice->entity);
+		if ((int) $invoice->entity <= 0) {
+			return -1;
+		}
+		$targetSocid = $this->getSocIdFromEntity((int) $invoice->entity, $targetEntity);
 
 		if ($targetSocid <= 0) {
 			return -1;
@@ -401,155 +441,189 @@ class TTELink
 	public function cloneOrder($idOrderSource, $toEntity)
 	{
 		global $db, $conf, $user, $mc, $langs;
+		/** @var DoliDB $db */
+		/** @var Conf $conf */
+		/** @var User $user */
+		/** @var Translate $langs */
 
 		$cf = new CommandeFournisseur($db);
-		$cf->fetch($idOrderSource);
+		if ($cf->fetch($idOrderSource) <= 0) {
+			$this->error = $cf->errorsToString();
+			return -1;
+		}
 
-		$fk_soc = $this->getSocIdFromEntity($conf->entity, $toEntity);
+		if ((int) $cf->entity <= 0) {
+			$this->error = $langs->trans('InterentitySyncInvalidSourceEntity');
+			return -1;
+		}
+		$fk_soc = $this->getSocIdFromEntity((int) $cf->entity, $toEntity);
 		if ($fk_soc > 0) {
 
-			dol_include_once('/commande/class/commande.class.php');
+			$execution = new InterentitydocumentsSyncContext($db);
+			$result = $execution->run((int) $toEntity, function () use ($db, $cf, $fk_soc, $toEntity, $idOrderSource): int {
+				global $conf, $user, $langs;
+				/** @var Conf $conf */
+				/** @var User $user */
+				/** @var Translate $langs */
 
-			$existingOrderId = $this->getOrderIdFromSupplierOrder($cf, $toEntity);
-			if ($existingOrderId > 0) {
-				// la commande existe déjà dans le système en face. On la supprime
-				$o = new Commande($db);
+				if (!isModEnabled('commande') || !$user->hasRight('commande', 'creer')) {
+					$this->error = $langs->trans('NotEnoughPermissions');
+					return -1;
+				}
 
-				$previous_entity = $conf->entity;
-				$conf->entity = $toEntity;
-				if ($o->fetch($existingOrderId) > 0) {
-					$delRes = $o->delete($user);
-					if ($delRes < 0) {
-						$this->error = $o->error;
-						$conf->entity = $previous_entity;
-						return -3;
+				dol_include_once('/commande/class/commande.class.php');
+
+				$existingOrderId = $this->getOrderIdFromSupplierOrder($cf, $toEntity, $fk_soc);
+				if ($existingOrderId < 0) {
+					return -1;
+				}
+				if ($existingOrderId > 0) {
+					if (!$user->hasRight('commande', 'supprimer')) {
+						$this->error = $langs->trans('NotEnoughPermissions');
+						return -1;
 					}
-				} else {
+					// la commande existe déjà dans le système en face. On la supprime
+					$o = new Commande($db);
+
+					$previous_entity = $conf->entity;
+					$conf->entity = $toEntity;
+					if ($o->fetch($existingOrderId) > 0) {
+						$delRes = $o->delete($user);
+						if ($delRes < 0) {
+							$this->error = $o->errorsToString();
+							$conf->entity = $previous_entity;
+							return -3;
+						}
+					} else {
+						$conf->entity = $previous_entity;
+						return -2;
+					}
+
 					$conf->entity = $previous_entity;
-					return -2;
 				}
 
-				$conf->entity = $previous_entity;
-			}
+				$o = new Commande($db);
+				$o->date = date('Y-m-d H:i:s');
+				$o->ref_client = $cf->ref;
+				$o->socid = $fk_soc;
 
-			$o = new Commande($db);
-			$o->date = date('Y-m-d H:i:s');
-			$o->ref_client = $cf->ref;
-			$o->socid = $fk_soc;
+				$o->fk_project = $cf->fk_project; //TODO check if it's shared project
+				$o->lines = array();
 
-			$o->fk_project = $cf->fk_project; //TODO check if it's shared project
-			$o->lines = array();
+				foreach ($cf->lines as $line) {
+					$lineOrder = new OrderLine($db);
+					$lineOrder->origin = 'supplierorderdet';
+					$TPropertiesToClone = array('desc', 'subprice', 'qty', 'tva_tx', 'vat_src_code', 'localtax1_tx', 'localtax2_tx', 'fk_product', 'remise_percent', 'info_bits', 'fk_remise_except', 'date_start', 'date_end', 'product_type', 'rang', 'special_code', 'fk_parent_line', 'fk_fournprice', 'pa_ht', 'label', 'array_options', 'fk_unit', 'id');
 
-			foreach ($cf->lines as $line) {
-				$lineOrder = new OrderLine($db);
-				$lineOrder->origin = 'supplierorderdet';
-				$TPropertiesToClone = array('desc', 'subprice', 'qty', 'tva_tx', 'vat_src_code', 'localtax1_tx', 'localtax2_tx', 'fk_product', 'remise_percent', 'info_bits', 'fk_remise_except', 'date_start', 'date_end', 'product_type', 'rang', 'special_code', 'fk_parent_line', 'fk_fournprice', 'pa_ht', 'label', 'array_options', 'fk_unit', 'id');
+					foreach ($TPropertiesToClone as $property) {
+						$lineOrder->{$property} = $line->{$property};
+					}
 
-				foreach ($TPropertiesToClone as $property) {
-					$lineOrder->{$property} = $line->{$property};
-				}
+					if ($line->fk_product) {
+						$producttmp = new ProductFournisseur($db);
+						$ret = $producttmp->fetch($line->fk_product);
 
-				if ($line->fk_product) {
-					$producttmp = new ProductFournisseur($db);
-					$ret = $producttmp->fetch($line->fk_product);
+						if ($ret > 0) {
+							$lineOrder->pa_ht = $producttmp->cost_price; // cout de revient
 
-					if ($ret > 0) {
-						$lineOrder->pa_ht = $producttmp->cost_price; // cout de revient
-
-						if ($conf->global->MARGIN_TYPE == '1') // best fournprice
-						{
-							$ret = $producttmp->find_min_price_product_fournisseur($line->fk_product, $line->qty);
-							if ($ret > 0) $lineOrder->pa_ht = $producttmp->fourn_unitprice;
-						} else if ($conf->global->MARGIN_TYPE == 'pmp' && !empty($conf->stock->enabled)) // pmp
-						{
-							$lineOrder->pa_ht = $producttmp->pmp;
+							if (getDolGlobalString('MARGIN_TYPE') === '1') // best fournprice
+							{
+								$ret = $producttmp->find_min_price_product_fournisseur($line->fk_product, $line->qty);
+								if ($ret > 0) $lineOrder->pa_ht = $producttmp->fourn_unitprice;
+							} else if (getDolGlobalString('MARGIN_TYPE') === 'pmp' && !empty($conf->stock->enabled)) // pmp
+							{
+								$lineOrder->pa_ht = $producttmp->pmp;
+							}
 						}
 					}
+
+					// Liaison entre les lignes de la commande fournisseur de l'entité A et les lignes de la commande créée côté entité B
+					$lineOrder->array_options['options_supplier_order_det_source'] = $line->id;
+
+					$o->lines[] = $lineOrder;
 				}
 
-				// Liaison entre les lignes de la commande fournisseur de l'entité A et les lignes de la commande créée côté entité B
-				$lineOrder->array_options['options_supplier_order_det_source'] = $line->id;
+				if (!empty($conf->global->IED_DONT_FORCE_BUY_PRICE_WITH_SELL_PRICE)) {
+					$oldval = $conf->global->ForceBuyingPriceIfNull;
+					$conf->global->ForceBuyingPriceIfNull = 0;
+				}
 
-				$o->lines[] = $lineOrder;
-			}
+				$orderCreatedRes = $o->create($user);
 
-			if (!empty($conf->global->IED_DONT_FORCE_BUY_PRICE_WITH_SELL_PRICE)) {
-				$oldval = $conf->global->ForceBuyingPriceIfNull;
-				$conf->global->ForceBuyingPriceIfNull = 0;
-			}
-
-			$orderCreatedRes = $o->create($user);
-
-			if ($orderCreatedRes < 0) {
-				if (!empty($conf->global->IED_DONT_FORCE_BUY_PRICE_WITH_SELL_PRICE)) $conf->global->ForceBuyingPriceIfNull = $oldval;
-				$this->error = $o->error;
-				return -4;
-			} else {
-				if ((float)DOL_VERSION >= 14.0) {
-					//Cannot use $o->copy_linked_contact because it copy fk_c_type_contact from object order_supplier but we need order
-					//So We recode the method here
-					$contacts = $cf->liste_contact(-1, 'external');
-					if (!empty($contacts)) {
-						$o->delete_linked_contact('external');
-						foreach ($contacts as $contact) {
-							$sqltypeContact  = 'SELECT rowid FROM ' . MAIN_DB_PREFIX . 'c_type_contact WHERE element=\'' . $o->element . '\'';
-							$sqltypeContact .= ' AND source=\'' . $o->db->escape($contact['source']) . '\'';
-							$sqltypeContact .= ' AND code=\'' . $o->db->escape($contact['code']) . '\'';
-							$resqlCopyContact = $o->db->query($sqltypeContact);
-							if (!$resqlCopyContact) {
-								setEventMessage($o->db->lasterror(), 'errors');
-							} else {
-								$obj = $o->db->fetch_object($resqlCopyContact);
-								if ($o->add_contact($contact['id'], $obj->rowid, $contact['source']) < 0) {
+				if ($orderCreatedRes <= 0 || (int) $o->id <= 0) {
+					if (!empty($conf->global->IED_DONT_FORCE_BUY_PRICE_WITH_SELL_PRICE)) $conf->global->ForceBuyingPriceIfNull = $oldval;
+					$this->error = $o->errorsToString();
+					return -4;
+				} else {
+					if ((float)DOL_VERSION >= 14.0) {
+						//Cannot use $o->copy_linked_contact because it copy fk_c_type_contact from object order_supplier but we need order
+						//So We recode the method here
+						$contacts = $cf->liste_contact(-1, 'external');
+						if (!empty($contacts)) {
+							$o->delete_linked_contact('external');
+							foreach ($contacts as $contact) {
+								$sqltypeContact  = 'SELECT rowid FROM ' . MAIN_DB_PREFIX . 'c_type_contact WHERE element=\'' . $o->element . '\'';
+								$sqltypeContact .= ' AND source=\'' . $o->db->escape($contact['source']) . '\'';
+								$sqltypeContact .= ' AND code=\'' . $o->db->escape($contact['code']) . '\'';
+								$resqlCopyContact = $o->db->query($sqltypeContact);
+								if (!$resqlCopyContact) {
 									setEventMessage($o->db->lasterror(), 'errors');
+								} else {
+									$obj = $o->db->fetch_object($resqlCopyContact);
+									if ($o->add_contact($contact['id'], $obj->rowid, $contact['source']) < 0) {
+										setEventMessage($o->db->lasterror(), 'errors');
+									}
 								}
 							}
 						}
 					}
-				}
 
-				if (!empty($conf->nomenclature->enabled)) {
-					$orderID = $o->id;
-					$o = new Commande($db);
-					$res = $o->fetch($orderID); // Rechargement pour récupérer les bons IDs des lignes
+					if (!empty($conf->nomenclature->enabled)) {
+						$orderID = $o->id;
+						$o = new Commande($db);
+						$res = $o->fetch($orderID); // Rechargement pour récupérer les bons IDs des lignes
 
-					dol_include_once('/nomenclature/class/nomenclature.class.php');
-					$PDOdb = new TPDOdb;
+						dol_include_once('/nomenclature/class/nomenclature.class.php');
+						$PDOdb = new TPDOdb;
 
-					foreach ($cf->lines as $k => &$line) {
-						$n = new TNomenclature;
-						$n->loadByObjectId($PDOdb, $line->id, $cf->element);
-						if ($n->iExist) {
-							$n->reinit();
-							$n->fk_object = $o->lines[$k]->id;
-							$n->object_type = $o->element;
-							$n->save($PDOdb);
+						foreach ($cf->lines as $k => &$line) {
+							$n = new TNomenclature;
+							$n->loadByObjectId($PDOdb, $line->id, $cf->element);
+							if ($n->iExist) {
+								$n->reinit();
+								$n->fk_object = $o->lines[$k]->id;
+								$n->object_type = $o->element;
+								$n->save($PDOdb);
+							}
 						}
 					}
+
+					// Le changement d'entité doit se faire après la création, sinon le fetch échoue
+					$res = $db->query("UPDATE " . MAIN_DB_PREFIX . "commande SET entity=" . $toEntity . " WHERE rowid=" . $o->id);
+
+					if (!$res) {
+						return -5;
+					}
+
+					// Lien entre la commande fournisseur et la commande client dans la table element_element
+					$sql  = "INSERT INTO " . MAIN_DB_PREFIX . "element_element (fk_source, sourcetype, fk_target, targettype) VALUES (";
+					$sql .= $idOrderSource . ", 'commandefourn', " . $o->id . ", 'commande')";
+					$res  = $db->query($sql);
+					if (!$res) {
+						return -6;
+					}
+
+					$o->entity = (int) $toEntity;
 				}
 
-				// Le changement d'entité doit se faire après la création, sinon le fetch échoue
-				$res = $db->query("UPDATE " . MAIN_DB_PREFIX . "commande SET entity=" . $toEntity . " WHERE rowid=" . $o->id);
+				if (!empty($conf->global->IED_DONT_FORCE_BUY_PRICE_WITH_SELL_PRICE)) $conf->global->ForceBuyingPriceIfNull = $oldval;
 
-				if (!$res) {
-					return -5;
-				}
-
-				// Lien entre la commande fournisseur et la commande client dans la table element_element
-				$sql  = "INSERT INTO " . MAIN_DB_PREFIX . "element_element (fk_source, sourcetype, fk_target, targettype) VALUES (";
-				$sql .= $idOrderSource . ", 'commandefourn', " . $o->id . ", 'commande')";
-				$res  = $db->query($sql);
-				if (!$res) {
-					return -6;
-				}
-
-				$o->entity = (int) $toEntity;
-				$this->copySourcePdfToTargetDocuments($cf, $o, (int) $toEntity, true);
+				return (int) $orderCreatedRes;
+			});
+			if ($execution->error !== '') {
+				$this->error = $execution->error;
 			}
-
-			if (!empty($conf->global->IED_DONT_FORCE_BUY_PRICE_WITH_SELL_PRICE)) $conf->global->ForceBuyingPriceIfNull = $oldval;
-
-			return $orderCreatedRes;
+			return $result;
 		} else {
 			return -1;
 		}
@@ -618,139 +692,157 @@ class TTELink
 		}
 		$context['target_soc_id'] = (int) $fk_soc;
 
-		$existingSupplierOrderId = $this->getSupplierOrderIdFromCustomerOrder($order, $toEntity, $fk_soc);
-		if ($existingSupplierOrderId < 0) {
-			return $this->failSupplierOrderClone('existing_order_lookup', -2, $context, $this->error);
-		}
-		if ($existingSupplierOrderId > 0) {
+		$execution = new InterentitydocumentsSyncContext($db);
+		$result = $execution->run((int) $toEntity, function () use ($db, $order, $fk_soc, $toEntity, $context): int {
+			global $conf, $user, $langs;
+			/** @var Conf $conf */
+			/** @var User $user */
+			/** @var Translate $langs */
+			if (!isModEnabled('supplier_order')
+				|| (!$user->hasRight('fournisseur', 'commande', 'creer') && !$user->hasRight('supplier_order', 'creer'))) {
+				return $this->failSupplierOrderClone('destination_permission', -1, $context, $langs->trans('NotEnoughPermissions'));
+			}
+			$existingSupplierOrderId = $this->getSupplierOrderIdFromCustomerOrder($order, $toEntity, $fk_soc);
+			if ($existingSupplierOrderId < 0) {
+				return $this->failSupplierOrderClone('existing_order_lookup', -2, $context, $this->error);
+			}
+			if ($existingSupplierOrderId > 0) {
+				if (!$user->hasRight('fournisseur', 'commande', 'supprimer') && !$user->hasRight('supplier_order', 'supprimer')) {
+					return $this->failSupplierOrderClone('destination_delete_permission', -1, $context, $langs->trans('NotEnoughPermissions'));
+				}
+				$supplierOrder = new CommandeFournisseur($db);
+				$context['supplier_order_id'] = (int) $existingSupplierOrderId;
+
+				$previous_entity = $conf->entity;
+				$conf->entity = $toEntity;
+				$existingOrderStage = 'fetch_existing_order';
+				try {
+					$res = $supplierOrder->fetch($existingSupplierOrderId);
+					if ($res <= 0) {
+						return $this->failSupplierOrderClone('fetch_existing_order', -2, $context, $supplierOrder->errorsToString());
+					}
+					$existingOrderStage = 'delete_existing_order';
+					dol_syslog(__METHOD__.' action=ORDER_VALIDATE stage=delete_existing_order source_order_id='.(int) $order->id.' supplier_order_id='.(int) $existingSupplierOrderId.' target_entity='.(int) $toEntity, LOG_DEBUG);
+					$delRes = $supplierOrder->delete($user);
+					if ($delRes < 0) {
+						return $this->failSupplierOrderClone('delete_existing_order', -3, $context, $supplierOrder->errorsToString());
+					}
+				} catch (Throwable $exception) {
+					$this->failSupplierOrderClone($existingOrderStage.'_exception', -3, $context);
+					dol_syslog(__METHOD__.' exception_type='.get_class($exception).' exception_line='.$exception->getLine(), LOG_ERR);
+					throw $exception;
+				} finally {
+					$conf->entity = $previous_entity;
+				}
+			}
+
 			$supplierOrder = new CommandeFournisseur($db);
-			$context['supplier_order_id'] = (int) $existingSupplierOrderId;
+			$supplierOrder->entity = (int) $toEntity;
+			$supplierOrder->date = !empty($order->date) ? $order->date : dol_now();
+			$supplierOrder->date_commande = !empty($order->date_commande) ? $order->date_commande : $supplierOrder->date;
+			$supplierOrder->delivery_date = !empty($order->delivery_date) ? $order->delivery_date : (!empty($order->date_livraison) ? $order->date_livraison : null);
+			$supplierOrder->ref_supplier = $order->ref;
+			$supplierOrder->socid = $fk_soc;
+			$supplierOrder->fk_project = !empty($order->fk_project) ? $order->fk_project : 0;
+			$supplierOrder->note_public = !empty($order->note_public) ? $order->note_public : '';
+			$supplierOrder->note_private = !empty($order->note_private) ? $order->note_private : '';
+			$supplierOrder->cond_reglement_id = !empty($order->cond_reglement_id) ? $order->cond_reglement_id : 0;
+			$supplierOrder->mode_reglement_id = !empty($order->mode_reglement_id) ? $order->mode_reglement_id : 0;
+			if (isset($order->fk_account)) {
+				$supplierOrder->fk_account = $order->fk_account;
+			}
+			if (isset($order->fk_incoterms)) {
+				$supplierOrder->fk_incoterms = $order->fk_incoterms;
+			}
+			if (isset($order->location_incoterms)) {
+				$supplierOrder->location_incoterms = $order->location_incoterms;
+			}
+			if (isset($order->multicurrency_code)) {
+				$supplierOrder->multicurrency_code = $order->multicurrency_code;
+			}
+			if (isset($order->multicurrency_tx)) {
+				$supplierOrder->multicurrency_tx = $order->multicurrency_tx;
+			}
+			$supplierOrder->lines = array();
+
+			foreach ($order->lines as $line) {
+				$lineSupplierOrder = new CommandeFournisseurLigne($db);
+
+				$TPropertiesToClone = array('desc', 'qty', 'tva_tx', 'vat_src_code', 'localtax1_tx', 'localtax2_tx', 'fk_product', 'remise_percent', 'info_bits', 'date_start', 'date_end', 'product_type', 'rang', 'special_code', 'fk_parent_line', 'label', 'array_options', 'fk_unit', 'multicurrency_subprice');
+
+				foreach ($TPropertiesToClone as $property) {
+					if (isset($line->{$property})) {
+						$lineSupplierOrder->{$property} = $line->{$property};
+					}
+				}
+
+				$lineSupplierOrder->subprice = isset($line->subprice) ? $line->subprice : 0;
+				$lineSupplierOrder->pu_ht = $lineSupplierOrder->subprice;
+				$lineSupplierOrder->qty = isset($lineSupplierOrder->qty) ? $lineSupplierOrder->qty : 0;
+				$lineSupplierOrder->tva_tx = isset($lineSupplierOrder->tva_tx) ? $lineSupplierOrder->tva_tx : 0;
+				$lineSupplierOrder->localtax1_tx = isset($lineSupplierOrder->localtax1_tx) ? $lineSupplierOrder->localtax1_tx : 0;
+				$lineSupplierOrder->localtax2_tx = isset($lineSupplierOrder->localtax2_tx) ? $lineSupplierOrder->localtax2_tx : 0;
+				$lineSupplierOrder->fk_product = isset($lineSupplierOrder->fk_product) ? $lineSupplierOrder->fk_product : 0;
+				$lineSupplierOrder->remise_percent = isset($lineSupplierOrder->remise_percent) ? $lineSupplierOrder->remise_percent : 0;
+				$lineSupplierOrder->info_bits = isset($lineSupplierOrder->info_bits) ? $lineSupplierOrder->info_bits : 0;
+				$lineSupplierOrder->product_type = isset($lineSupplierOrder->product_type) ? $lineSupplierOrder->product_type : 0;
+				$lineSupplierOrder->rang = isset($lineSupplierOrder->rang) ? $lineSupplierOrder->rang : -1;
+				$lineSupplierOrder->special_code = isset($lineSupplierOrder->special_code) ? $lineSupplierOrder->special_code : 0;
+				$lineSupplierOrder->array_options = isset($lineSupplierOrder->array_options) && is_array($lineSupplierOrder->array_options) ? $lineSupplierOrder->array_options : array();
+				$lineSupplierOrder->multicurrency_subprice = isset($lineSupplierOrder->multicurrency_subprice) ? $lineSupplierOrder->multicurrency_subprice : 0;
+				$lineSupplierOrder->ref_fourn = !empty($line->ref_supplier) ? $line->ref_supplier : (!empty($line->ref_fourn) ? $line->ref_fourn : '');
+				$lineSupplierOrder->ref_supplier = $lineSupplierOrder->ref_fourn;
+				$lineSupplierOrder->origin = 'commandedet';
+				$lineSupplierOrder->origin_id = !empty($line->id) ? (int) $line->id : 0;
+
+				$supplierOrder->lines[] = $lineSupplierOrder;
+			}
 
 			$previous_entity = $conf->entity;
-			$conf->entity = $toEntity;
-			$existingOrderStage = 'fetch_existing_order';
+			$conf->entity = (int) $toEntity;
+			dol_syslog(__METHOD__.' action=ORDER_VALIDATE stage=create_supplier_order source_order_id='.(int) $order->id.' source_entity='.(int) $order->entity.' target_entity='.(int) $toEntity.' target_soc_id='.(int) $fk_soc.' line_count='.count($supplierOrder->lines).' predefined_prices_only='.getDolGlobalInt('SUPPLIER_ORDER_WITH_PREDEFINED_PRICES_ONLY'), LOG_DEBUG);
 			try {
-				$res = $supplierOrder->fetch($existingSupplierOrderId);
-				if ($res <= 0) {
-					return $this->failSupplierOrderClone('fetch_existing_order', -2, $context, $supplierOrder->errorsToString());
-				}
-				$existingOrderStage = 'delete_existing_order';
-				dol_syslog(__METHOD__.' action=ORDER_VALIDATE stage=delete_existing_order source_order_id='.(int) $order->id.' supplier_order_id='.(int) $existingSupplierOrderId.' target_entity='.(int) $toEntity, LOG_DEBUG);
-				$delRes = $supplierOrder->delete($user);
-				if ($delRes < 0) {
-					return $this->failSupplierOrderClone('delete_existing_order', -3, $context, $supplierOrder->errorsToString());
-				}
+				$orderCreatedRes = $supplierOrder->create($user);
 			} catch (Throwable $exception) {
-				$this->failSupplierOrderClone($existingOrderStage.'_exception', -3, $context);
+				$this->failSupplierOrderClone('create_supplier_order_exception', -4, $context);
 				dol_syslog(__METHOD__.' exception_type='.get_class($exception).' exception_line='.$exception->getLine(), LOG_ERR);
 				throw $exception;
 			} finally {
 				$conf->entity = $previous_entity;
 			}
-		}
 
-		$supplierOrder = new CommandeFournisseur($db);
-		$supplierOrder->entity = (int) $toEntity;
-		$supplierOrder->date = !empty($order->date) ? $order->date : dol_now();
-		$supplierOrder->date_commande = !empty($order->date_commande) ? $order->date_commande : $supplierOrder->date;
-		$supplierOrder->delivery_date = !empty($order->delivery_date) ? $order->delivery_date : (!empty($order->date_livraison) ? $order->date_livraison : null);
-		$supplierOrder->ref_supplier = $order->ref;
-		$supplierOrder->socid = $fk_soc;
-		$supplierOrder->fk_project = !empty($order->fk_project) ? $order->fk_project : 0;
-		$supplierOrder->note_public = !empty($order->note_public) ? $order->note_public : '';
-		$supplierOrder->note_private = !empty($order->note_private) ? $order->note_private : '';
-		$supplierOrder->cond_reglement_id = !empty($order->cond_reglement_id) ? $order->cond_reglement_id : 0;
-		$supplierOrder->mode_reglement_id = !empty($order->mode_reglement_id) ? $order->mode_reglement_id : 0;
-		if (isset($order->fk_account)) {
-			$supplierOrder->fk_account = $order->fk_account;
-		}
-		if (isset($order->fk_incoterms)) {
-			$supplierOrder->fk_incoterms = $order->fk_incoterms;
-		}
-		if (isset($order->location_incoterms)) {
-			$supplierOrder->location_incoterms = $order->location_incoterms;
-		}
-		if (isset($order->multicurrency_code)) {
-			$supplierOrder->multicurrency_code = $order->multicurrency_code;
-		}
-		if (isset($order->multicurrency_tx)) {
-			$supplierOrder->multicurrency_tx = $order->multicurrency_tx;
-		}
-		$supplierOrder->lines = array();
-
-		foreach ($order->lines as $line) {
-			$lineSupplierOrder = new CommandeFournisseurLigne($db);
-
-			$TPropertiesToClone = array('desc', 'qty', 'tva_tx', 'vat_src_code', 'localtax1_tx', 'localtax2_tx', 'fk_product', 'remise_percent', 'info_bits', 'date_start', 'date_end', 'product_type', 'rang', 'special_code', 'fk_parent_line', 'label', 'array_options', 'fk_unit', 'multicurrency_subprice');
-
-			foreach ($TPropertiesToClone as $property) {
-				if (isset($line->{$property})) {
-					$lineSupplierOrder->{$property} = $line->{$property};
-				}
+			$context['supplier_order_id'] = (int) $supplierOrder->id;
+			$context['native_result'] = (int) $orderCreatedRes;
+			if ($orderCreatedRes <= 0 || (int) $supplierOrder->id <= 0) {
+				return $this->failSupplierOrderClone('create_supplier_order', -4, $context, $supplierOrder->errorsToString());
 			}
 
-			$lineSupplierOrder->subprice = isset($line->subprice) ? $line->subprice : 0;
-			$lineSupplierOrder->pu_ht = $lineSupplierOrder->subprice;
-			$lineSupplierOrder->qty = isset($lineSupplierOrder->qty) ? $lineSupplierOrder->qty : 0;
-			$lineSupplierOrder->tva_tx = isset($lineSupplierOrder->tva_tx) ? $lineSupplierOrder->tva_tx : 0;
-			$lineSupplierOrder->localtax1_tx = isset($lineSupplierOrder->localtax1_tx) ? $lineSupplierOrder->localtax1_tx : 0;
-			$lineSupplierOrder->localtax2_tx = isset($lineSupplierOrder->localtax2_tx) ? $lineSupplierOrder->localtax2_tx : 0;
-			$lineSupplierOrder->fk_product = isset($lineSupplierOrder->fk_product) ? $lineSupplierOrder->fk_product : 0;
-			$lineSupplierOrder->remise_percent = isset($lineSupplierOrder->remise_percent) ? $lineSupplierOrder->remise_percent : 0;
-			$lineSupplierOrder->info_bits = isset($lineSupplierOrder->info_bits) ? $lineSupplierOrder->info_bits : 0;
-			$lineSupplierOrder->product_type = isset($lineSupplierOrder->product_type) ? $lineSupplierOrder->product_type : 0;
-			$lineSupplierOrder->rang = isset($lineSupplierOrder->rang) ? $lineSupplierOrder->rang : -1;
-			$lineSupplierOrder->special_code = isset($lineSupplierOrder->special_code) ? $lineSupplierOrder->special_code : 0;
-			$lineSupplierOrder->array_options = isset($lineSupplierOrder->array_options) && is_array($lineSupplierOrder->array_options) ? $lineSupplierOrder->array_options : array();
-			$lineSupplierOrder->multicurrency_subprice = isset($lineSupplierOrder->multicurrency_subprice) ? $lineSupplierOrder->multicurrency_subprice : 0;
-			$lineSupplierOrder->ref_fourn = !empty($line->ref_supplier) ? $line->ref_supplier : (!empty($line->ref_fourn) ? $line->ref_fourn : '');
-			$lineSupplierOrder->ref_supplier = $lineSupplierOrder->ref_fourn;
-			$lineSupplierOrder->origin = 'commandedet';
-			$lineSupplierOrder->origin_id = !empty($line->id) ? (int) $line->id : 0;
+			// Transfert de la commande fournisseur dans l'entité cible si la création n'a pas déjà utilisé l'entité cible.
+			$res = $db->query("UPDATE " . MAIN_DB_PREFIX . "commande_fournisseur SET entity=" . intval($toEntity) . " WHERE rowid=" . intval($supplierOrder->id));
+			if (!$res) {
+				return $this->failSupplierOrderClone('assign_target_entity', -5, $context, $db->lasterror());
+			}
 
-			$supplierOrder->lines[] = $lineSupplierOrder;
+			// Lien entre la commande client et la commande fournisseur dans la table element_element.
+			$sql  = "INSERT INTO " . MAIN_DB_PREFIX . "element_element (fk_source, sourcetype, fk_target, targettype) VALUES (";
+			$sql .= intval($order->id) . ", 'commande', " . intval($supplierOrder->id) . ", 'commandefourn')";
+			$res  = $db->query($sql);
+			if (!$res) {
+				return $this->failSupplierOrderClone('link_orders', -6, $context, $db->lasterror());
+			}
+
+			// ORDER_VALIDATE runs before Commande::valid() renames the draft PDF and its ECM entry.
+			// Generating the definitive PDF here makes that native rename fail on uk_ecm_files.
+			// The existing afterPDFCreation hook copies the PDF after native generation instead.
+			dol_syslog(__METHOD__.' action=ORDER_VALIDATE stage=copy_source_pdf source_order_id='.(int) $order->id.' target_entity='.(int) $toEntity.' result=0 reason=awaiting_native_pdf', LOG_DEBUG);
+			dol_syslog(__METHOD__.' action=ORDER_VALIDATE stage=clone_returned source_order_id='.(int) $order->id.' supplier_order_id='.(int) $supplierOrder->id.' target_entity='.(int) $toEntity.' result='.(int) $orderCreatedRes.' pdf_result=0 transaction=caller', LOG_INFO);
+
+			return (int) $orderCreatedRes;
+		});
+		if ($execution->error !== '') {
+			return $this->failSupplierOrderClone('destination_actor', -1, $context, $execution->error);
 		}
-
-		$previous_entity = $conf->entity;
-		$conf->entity = (int) $toEntity;
-		dol_syslog(__METHOD__.' action=ORDER_VALIDATE stage=create_supplier_order source_order_id='.(int) $order->id.' source_entity='.(int) $order->entity.' target_entity='.(int) $toEntity.' target_soc_id='.(int) $fk_soc.' line_count='.count($supplierOrder->lines).' predefined_prices_only='.getDolGlobalInt('SUPPLIER_ORDER_WITH_PREDEFINED_PRICES_ONLY'), LOG_DEBUG);
-		try {
-			$orderCreatedRes = $supplierOrder->create($user);
-		} catch (Throwable $exception) {
-			$this->failSupplierOrderClone('create_supplier_order_exception', -4, $context);
-			dol_syslog(__METHOD__.' exception_type='.get_class($exception).' exception_line='.$exception->getLine(), LOG_ERR);
-			throw $exception;
-		} finally {
-			$conf->entity = $previous_entity;
-		}
-
-		$context['supplier_order_id'] = (int) $supplierOrder->id;
-		$context['native_result'] = (int) $orderCreatedRes;
-		if ($orderCreatedRes <= 0 || (int) $supplierOrder->id <= 0) {
-			return $this->failSupplierOrderClone('create_supplier_order', -4, $context, $supplierOrder->errorsToString());
-		}
-
-		// Transfert de la commande fournisseur dans l'entité cible si la création n'a pas déjà utilisé l'entité cible.
-		$res = $db->query("UPDATE " . MAIN_DB_PREFIX . "commande_fournisseur SET entity=" . intval($toEntity) . " WHERE rowid=" . intval($supplierOrder->id));
-		if (!$res) {
-			return $this->failSupplierOrderClone('assign_target_entity', -5, $context, $db->lasterror());
-		}
-
-		// Lien entre la commande client et la commande fournisseur dans la table element_element.
-		$sql  = "INSERT INTO " . MAIN_DB_PREFIX . "element_element (fk_source, sourcetype, fk_target, targettype) VALUES (";
-		$sql .= intval($order->id) . ", 'commande', " . intval($supplierOrder->id) . ", 'commandefourn')";
-		$res  = $db->query($sql);
-		if (!$res) {
-			return $this->failSupplierOrderClone('link_orders', -6, $context, $db->lasterror());
-		}
-
-		// ORDER_VALIDATE runs before Commande::valid() renames the draft PDF and its ECM entry.
-		// Generating the definitive PDF here makes that native rename fail on uk_ecm_files.
-		// The existing afterPDFCreation hook copies the PDF after native generation instead.
-		dol_syslog(__METHOD__.' action=ORDER_VALIDATE stage=copy_source_pdf source_order_id='.(int) $order->id.' target_entity='.(int) $toEntity.' result=0 reason=awaiting_native_pdf', LOG_DEBUG);
-		dol_syslog(__METHOD__.' action=ORDER_VALIDATE stage=clone_returned source_order_id='.(int) $order->id.' supplier_order_id='.(int) $supplierOrder->id.' target_entity='.(int) $toEntity.' result='.(int) $orderCreatedRes.' pdf_result=0 transaction=caller', LOG_INFO);
-
-		return $orderCreatedRes;
+		return $result;
 	}
 
 	/**
@@ -793,13 +885,14 @@ class TTELink
 	public function isCustomerOrderCreatedFromSupplierOrder($orderId)
 	{
 		global $db;
+		/** @var DoliDB $db */
 
 		$sql = "SELECT rowid FROM " . MAIN_DB_PREFIX . "element_element"
 			. " WHERE fk_target = " . intval($orderId)
 			. " AND targettype = 'commande'"
 			. " AND sourcetype = 'commandefourn'";
 		$res = $db->query($sql);
-		if (!$res) {
+		if (!$res || $res === true) {
 			$this->error = $db->lasterror();
 			return -1;
 		}
@@ -816,8 +909,11 @@ class TTELink
 	 */
 	public function getOrderIdFromSupplierOrder($supplierOrder, $targetEntity, $targetSocid = false)
 	{
+		if ((int) $supplierOrder->entity <= 0) {
+			return -1;
+		}
 		if (!$targetSocid) {
-			$targetSocid = $this->getSocIdFromEntity($targetEntity, $supplierOrder->entity);
+			$targetSocid = $this->getSocIdFromEntity((int) $supplierOrder->entity, $targetEntity);
 		}
 
 		if ($targetSocid <= 0) {
@@ -930,6 +1026,7 @@ class TTELink
 	public function syncLinkedTargetPdfs($sourceObject, $forceGenerateSourcePdf = false, $preferredSourceFile = '')
 	{
 		global $db;
+		/** @var DoliDB $db */
 
 		if (!is_object($sourceObject) || empty($sourceObject->id)) {
 			return 0;
@@ -955,14 +1052,17 @@ class TTELink
 		$sql .= " AND sourcetype IN (".implode(',', $escapedSourceTypes).")";
 
 		$resql = $db->query($sql);
-		if (!$resql) {
+		if (!$resql || $resql === true) {
 			$this->error = $db->lasterror();
 			dol_syslog('interentitydocuments: unable to fetch linked objects for PDF synchronization: '.$this->error, LOG_WARNING);
 			return 0;
 		}
 
 		$copyCount = 0;
-		while ($obj = $db->fetch_object($resql)) {
+		while (is_object($obj = $db->fetch_object($resql))) {
+			if (!isset($obj->fk_target, $obj->targettype) || !is_numeric($obj->fk_target) || !is_string($obj->targettype)) {
+				continue;
+			}
 			$targetObject = $this->fetchDocumentObject($obj->targettype, (int) $obj->fk_target);
 			if (!is_object($targetObject)) {
 				dol_syslog('interentitydocuments: unable to fetch linked target '.$obj->targettype.'#'.((int) $obj->fk_target).' for PDF synchronization', LOG_WARNING);

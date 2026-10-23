@@ -2,7 +2,10 @@
 
 ## 1.0.2 - 2026-10-23
 
-- Correction du blocage de validation d'une commande client disposant déjà d'un PDF de brouillon : la copie inter-entités attend désormais la génération native et le hook `afterPDFCreation`, sans créer de doublon `uk_ecm_files` avant le renommage ECM. Si la génération automatique est désactivée, la copie intervient à la prochaine génération native du PDF.
+- Ajout d’un utilisateur d’exécution configurable par entité destinataire : les commandes, factures et règlements déjà synchronisés peuvent être créés avec ses droits natifs sans donner à l’utilisateur source un accès à cette entité. Choisir ce compte dans les réglages de chaque destination après mise à jour ; aucun nouveau flux de facturation n’est ajouté.
+- Rechargement du contexte natif de destination et restauration du contexte source après succès, refus ou exception ; propagation des erreurs bancaires à la transaction source.
+
+- Correction du blocage de validation d’un document source disposant déjà d’un PDF de brouillon : la copie inter-entités attend désormais la génération native et le hook `afterPDFCreation`, sans créer de doublon `uk_ecm_files` avant le renommage ECM. Si la génération automatique est désactivée, la copie intervient à la prochaine génération native du PDF.
 - Ajout de journaux de diagnostic pour `ORDER_VALIDATE` précisant l'étape, les identifiants de commande, les entités, le résultat natif et le code d'erreur de base de données, sans exposer de requête SQL ni de contenu client sensible.
 - Restitution des erreurs natives complètes à Dolibarr et message explicite lorsqu'une correspondance inverse entre tiers et entité manque.
 - Arrêt du clonage après une erreur de recherche ou un résultat de création invalide, contrôle de l'entité propriétaire et restauration du contexte d'entité après les appels natifs, y compris en cas d'exception.
